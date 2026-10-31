@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How It Works</title>
+<link rel="stylesheet" href="../common.css">
+<style>
+  .machines { display: grid; gap: 8px; }
+  .machines button { text-align: left; padding: 10px; }
+  .machines button small { display: block; color: inherit; opacity: .75; }
+  #stage { aspect-ratio: 3 / 2; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .controls input[type=range] { flex: 1; min-width: 140px; }
+  #explain h3 { margin-top: 0; }
+  #explain .step { border-left: 4px solid var(--accent); padding: 6px 10px; background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: 4px; margin: 10px 0; }
+  #extra label { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 14px; }
+  #extra select { width: 100%; }
+  .facts { padding-left: 18px; font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="home" href="../index.html">← Science Studio</a>
+  <h1>How It Works</h1>
+  <span class="sub">Animated cutaways. Slow them down, pause and scrub to see every step.</span>
+</header>
+<div class="layout">
+  <aside class="panel">
+    <h2>Machines</h2>
+    <div class="machines" id="machines"></div>
+    <h3>Display</h3>
+    <label class="small row" style="gap:6px"><input type="checkbox" id="labels" checked> Show labels</label>
+  </aside>
+  <section class="stack">
+    <canvas id="stage" width="1200" height="800" aria-label="Animation"></canvas>
+    <div class="controls panel">
+      <button id="play" class="primary">Pause</button>
+      <button id="stepBtn">Step ▸</button>
+      <span class="small">Speed</span>
+      <input type="range" id="speed" min="0.05" max="2" step="0.05" value="0.5">
+      <span class="small" id="speedVal">0.5×</span>
+    </div>
+    <div class="controls panel" id="scrubRow">
+      <span class="small">Cycle position</span>
+      <input type="range" id="scrub" min="0" max="1" step="0.001" value="0">
+    </div>
+  </section>
+  <aside class="panel">
+    <h2>What's happening</h2>
+    <div id="explain"></div>
+    <div id="extra"></div>
+  </aside>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById('stage'), ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  const $ = id => document.getElementById(id);
+  const dark = () => matchMedia('(prefers-color-scheme: dark)').matches;
+  const C = () => dark()
+    ? { ink: '#d5dbe5', muted: '#8d96a6', metal: '#7d8794', metalDark: '#59616d', metalLight: '#a9b2bd', bg: '#161a21', body: '#2a303b', accent: '#6fa0ff', brass: '#d4a83a', red: '#ff6b5b', blue: '#5b9bff' }
+    : { ink: '#232a36', muted: '#6b7383', metal: '#9aa3ae', metalDark: '#6c7480', metalLight: '#c9d0d8', bg: '#fbfcfd', body: '#e3e7ec', accent: '#2f6fde', brass: '#c8962a', red: '#d63b3b', blue: '#2a6fdb' };
+
+  // ---------- Drawing helpers ----------
+  function rr(x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function line(x1, y1, x2, y2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+  function arrow(x1, y1, x2, y2, color, w = 4) {
+    const a = Math.atan2(y2 - y1, x2 - x1), hl = 8 + w * 2;
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = w;
+    line(x1, y1, x2 - Math.cos(a) * hl * 0.6, y2 - Math.sin(a) * hl * 0.6);
+    ctx.beginPath(); ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - hl * Math.cos(a - 0.45), y2 - hl * Math.sin(a - 0.45));
+    ctx.lineTo(x2 - hl * Math.cos(a + 0.45), y2 - hl * Math.sin(a + 0.45));
+    ctx.closePath(); ctx.fill();
+  }
+  // Callout: a dot on the part, a leader line, and a text label.
+  function callout(px, py, tx, ty, text) {
+    if (!$('labels').checked) return;
+    const c = C();
+    ctx.strokeStyle = c.muted; ctx.lineWidth = 1.5; ctx.fillStyle = c.ink;
+    line(px, py, tx, ty);
+    ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.font = '600 20px system-ui'; ctx.textAlign = tx < px ? 'right' : 'left';
+    ctx.fillText(text, tx + (tx < px ? -6 : 6), ty + 7);
+    ctx.textAlign = 'left';
+  }
+  function title(text, sub) {
+    const c = C();
+    ctx.fillStyle = c.ink; ctx.font = 'bold 30px system-ui'; ctx.fillText(text, 30, 50);
+    if (sub) { ctx.fillStyle = c.muted; ctx.font = '20px system-ui'; ctx.fillText(sub, 30, 80); }
+  }
+
+  // ======================================================================
+  // 1. Four-stroke engine
+  // ======================================================================
+  const engine = {
+    name: 'Four-stroke engine', blurb: 'How a car engine turns fuel into motion',
+    period: 4, // seconds per full cycle at 1×
+    phases: [
+      { name: '1. Intake', text: 'The piston moves <b>down</b>. The intake valve is open, so the falling piston sucks a mixture of air and fuel into the cylinder.' },
+      { name: '2. Compression', text: 'Both valves close. The piston moves <b>up</b> and squeezes the mixture into a tiny space, which makes it hot and ready to burn.' },
+      { name: '3. Power', text: 'The spark plug fires. The mixture burns explosively and the hot gas pushes the piston <b>down</b> hard. This is the only stroke that makes power.' },
+      { name: '4. Exhaust', text: 'The exhaust valve opens. The piston moves <b>up</b> and pushes the burnt gases out of the cylinder, ready to start again.' },
+    ],
+    facts: ['The crankshaft turns <b>twice</b> for every power stroke.', 'The heavy flywheel keeps the engine spinning through the three non-power strokes.', 'A car engine at highway speed completes about 25 full cycles every second.'],
+    phaseAt(t) { return ((Math.floor(t * 4) % 4) + 4) % 4; },
+    draw(t) {
+      const c = C();
+      title('Four-stroke engine', this.phases[this.phaseAt(t)].name);
+      const theta = t * 4 * Math.PI; // crank angle, 0 = top dead centre
+      const cx = 600, crankY = 590, r = 80, rod = 230;
+      const pinX = cx + r * Math.sin(theta), pinY = crankY - r * Math.cos(theta);
+      const pistonY = crankY - (r * Math.cos(theta) + Math.sqrt(rod * rod - (r * Math.sin(theta)) ** 2)); // wrist pin
+      const cylTop = 160, cylW = 200, pistonH = 90, pistonTop = pistonY - 40;
+      const phase = this.phaseAt(t), local = (t * 4) % 1;
+
+      // Gas in the chamber
+      let gas = null;
+      if (phase === 0) gas = `rgba(80,150,255,${0.15 + 0.35 * local})`;
+      else if (phase === 1) gas = `rgba(80,150,255,${0.5 + 0.3 * local})`;
+      else if (phase === 2) gas = local < 0.25 ? `rgba(255,${140 + 200 * local},40,${0.95 - local})` : `rgba(150,140,130,${0.7 - 0.2 * local})`;
+      else gas = `rgba(130,130,130,${0.6 * (1 - local)})`;
+      ctx.fillStyle = gas; ctx.fillRect(cx - cylW / 2, cylTop, cylW, pistonTop - cylTop);
+
+      // Explosion flash at start of power stroke
+      if (phase === 2 && local < 0.2) {
+        const g = ctx.createRadialGradient(cx, cylTop + 10, 5, cx, cylTop + 10, 180);
+        g.addColorStop(0, 'rgba(255,240,150,.95)'); g.addColorStop(1, 'rgba(255,120,30,0)');
+        ctx.fillStyle = g; ctx.fillRect(cx - cylW / 2, cylTop, cylW, pistonTop - cylTop);
+      }
+
+      // Cylinder walls and head
+      ctx.fillStyle = c.body; ctx.strokeStyle = c.ink; ctx.lineWidth = 3;
+      ctx.fillRect(cx - cylW / 2 - 40, cylTop, 40, 340); ctx.strokeRect(cx - cylW / 2 - 40, cylTop, 40, 340);
+      ctx.fillRect(cx + cylW / 2, cylTop, 40, 340); ctx.strokeRect(cx + cylW / 2, cylTop, 40, 340);
+      // head with ports
+      ctx.fillRect(cx - cylW / 2 - 140, cylTop - 70, cylW + 280, 70); ctx.strokeRect(cx - cylW / 2 - 140, cylTop - 70, cylW + 280, 70);
+      // Ports (channels)
+      ctx.fillStyle = c.bg;
+      ctx.fillRect(cx - cylW / 2 - 140, cylTop - 55, 120, 34); ctx.fillRect(cx - 70, cylTop - 40, 30, 40);
+      ctx.fillRect(cx + cylW / 2 + 20, cylTop - 55, 120, 34); ctx.fillRect(cx + 40, cylTop - 40, 30, 40);
+      // Port gas flow
+      if (phase === 0) { ctx.fillStyle = 'rgba(80,150,255,.45)'; ctx.fillRect(cx - cylW / 2 - 140, cylTop - 55, 120, 34); arrow(cx - 230, cylTop - 38, cx - 120, cylTop - 38, c.blue, 4); arrow(cx - 55, cylTop - 20, cx - 55, cylTop + 50, c.blue, 4); }
+      if (phase === 3) { ctx.fillStyle = 'rgba(130,130,130,.45)'; ctx.fillRect(cx + cylW / 2 + 20, cylTop - 55, 120, 34); arrow(cx + 55, cylTop + 50, cx + 55, cylTop - 20, c.muted, 4); arrow(cx + 120, cylTop - 38, cx + 230, cylTop - 38, c.muted, 4); }
+
+      // Valves: lift follows a smooth bump during their stroke
+      const lift = (ph) => phase === ph ? Math.sin(local * Math.PI) * 30 : 0;
+      const drawValve = (x, l) => {
+        ctx.fillStyle = c.metal; ctx.strokeStyle = c.ink; ctx.lineWidth = 2;
+        ctx.fillRect(x - 5, cylTop - 120 + l, 10, 120); ctx.strokeRect(x - 5, cylTop - 120 + l, 10, 120);
+        ctx.beginPath(); ctx.moveTo(x - 30, cylTop + l); ctx.lineTo(x + 30, cylTop + l); ctx.lineTo(x + 8, cylTop - 12 + l); ctx.lineTo(x - 8, cylTop - 12 + l); ctx.closePath(); ctx.fill(); ctx.stroke();
+      };
+      drawValve(cx - 55, lift(0));
+      drawValve(cx + 55, lift(3));
+
+      // Spark plug
+      ctx.fillStyle = '#f2f2f2'; ctx.strokeStyle = c.ink; ctx.lineWidth = 2;
+      ctx.fillRect(cx - 9, cylTop - 130, 18, 70); ctx.strokeRect(cx - 9, cylTop - 130, 18, 70);
+      ctx.fillStyle = c.metal; ctx.fillRect(cx - 4, cylTop - 60, 8, 58);
+      if (phase === 2 && local < 0.08 || phase === 1 && local > 0.97) {
+        ctx.strokeStyle = '#ffe14d'; ctx.lineWidth = 3;
+        for (let k = 0; k < 6; k++) { const a = k / 6 * Math.PI * 2; line(cx, cylTop + 4, cx + Math.cos(a) * 26, cylTop + 4 + Math.sin(a) * 26); }
+      }
+
+      // Crank web & counterweight (drawn first so the piston skirt sits in front)
+      ctx.fillStyle = c.metalDark; ctx.strokeStyle = c.ink; ctx.lineWidth = 3;
+      ctx.save(); ctx.translate(cx, crankY); ctx.rotate(theta);
+      ctx.beginPath(); ctx.arc(0, 0, 110, Math.PI * 0.25, Math.PI * 0.75); ctx.lineTo(0, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+      rr(-22, -r - 22, 44, r + 44, 20); ctx.fill(); ctx.stroke();
+      ctx.restore();
+      // Connecting rod
+      ctx.strokeStyle = c.metal; ctx.lineWidth = 26; ctx.lineCap = 'round'; line(cx, pistonY, pinX, pinY);
+      ctx.strokeStyle = c.ink; ctx.lineWidth = 2; ctx.lineCap = 'butt';
+      ctx.fillStyle = c.ink; ctx.beginPath(); ctx.arc(pinX, pinY, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = c.metalLight; ctx.beginPath(); ctx.arc(cx, crankY, 22, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+      // Piston
+      ctx.fillStyle = c.metalLight; ctx.strokeStyle = c.ink; ctx.lineWidth = 3;
+      rr(cx - cylW / 2 + 4, pistonTop, cylW - 8, pistonH, 6); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = c.metalDark; ctx.lineWidth = 2;
+      for (let k = 0; k < 3; k++) line(cx - cylW / 2 + 6, pistonTop + 12 + k * 10, cx + cylW / 2 - 6, pistonTop + 12 + k * 10);
+      // Push arrow on power stroke
+      if (phase === 2) arrow(cx, pistonTop - 70, cx, pistonTop - 10, c.red, 6);
+
+      ctx.fillStyle = c.ink; ctx.beginPath(); ctx.arc(cx, pistonY, 9, 0, Math.PI * 2); ctx.fill(); // wrist pin
+      // Rotation hint
+      ctx.strokeStyle = c.accent; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(cx, crankY, 160, -0.5, 0.3); ctx.stroke();
+      arrow(cx + 160 * Math.cos(0.2), crankY + 160 * Math.sin(0.2), cx + 160 * Math.cos(0.32), crankY + 160 * Math.sin(0.32), c.accent, 3);
+
+      // Labels
+      callout(cx, cylTop - 120, cx + 330, cylTop - 110, 'Spark plug');
+      callout(cx - 55, cylTop - 100, cx - 330, cylTop - 20, 'Intake valve');
+      callout(cx + 55, cylTop - 100, cx + 330, cylTop - 20, 'Exhaust valve');
+      callout(cx - 180, cylTop - 38, cx - 330, cylTop + 45, 'Fuel + air in');
+      callout(cx + 180, cylTop - 38, cx + 330, cylTop + 45, 'Exhaust out');
+      callout(cx + cylW / 2 - 20, pistonTop + 40, cx + 330, pistonTop + 40, 'Piston');
+      const midX = (cx + pinX) / 2, midY = (pistonY + pinY) / 2;
+      callout(midX, midY, cx - 330, midY, 'Connecting rod');
+      callout(cx + 30, crankY + 60, cx + 330, crankY + 120, 'Crankshaft');
+      callout(cx - cylW / 2 - 20, cylTop + 200, cx - 330, cylTop + 200, 'Cylinder');
+
+      // Stroke timeline
+      this.drawTimeline(t);
+    },
+    drawTimeline(t) {
+      const c = C(), x0 = 100, y = 760, w = 1000, seg = w / 4;
+      const cols = ['rgba(80,150,255,.55)', 'rgba(80,150,255,.85)', 'rgba(255,150,40,.85)', 'rgba(140,140,140,.7)'];
+      this.phases.forEach((p, i) => {
+        ctx.fillStyle = cols[i]; rr(x0 + i * seg + 2, y - 18, seg - 4, 30, 6); ctx.fill();
+        ctx.fillStyle = c.ink; ctx.font = (this.phaseAt(t) === i ? 'bold ' : '') + '17px system-ui'; ctx.textAlign = 'center';
+        ctx.fillText(p.name, x0 + i * seg + seg / 2, y + 3);
+      });
+      ctx.textAlign = 'left';
+      ctx.fillStyle = c.ink; const mx = x0 + (t % 1) * w;
+      ctx.beginPath(); ctx.moveTo(mx, y - 22); ctx.lineTo(mx - 8, y - 34); ctx.lineTo(mx + 8, y - 34); ctx.closePath(); ctx.fill();
+    },
+    explain(t) { return this.phases[this.phaseAt(t)]; },
+  };
+
+  // ======================================================================
+  // 2. DC electric motor (physics-driven)
+  // ======================================================================
+  const motor = {
+    name: 'DC electric motor', blurb: 'How electricity makes things spin',
+    simulated: true,
+    phi: 0.3, omega: 0, voltage: 6, commutator: true, current: 0,
+    facts: ['A current-carrying wire in a magnetic field feels a force: <b>F = B·I·L</b>.', 'Without the commutator the coil just rocks back and forth and stops. Try unticking it.', 'Real motors use many coils so there is always one in a good position, giving smooth torque.'],
+    extra() {
+      return `<label>Battery voltage <input type="range" id="mv" min="0" max="12" step="0.5" value="${this.voltage}"> <span id="mvv">${this.voltage} V</span></label>
+        <label><input type="checkbox" id="mc" ${this.commutator ? 'checked' : ''}> Split-ring commutator</label>
+        <label><button id="mr">Reverse battery</button></label>`;
+    },
+    bind() {
+      $('mv').addEventListener('input', e => { this.voltage = +e.target.value * Math.sign(this.voltage || 1); $('mvv').textContent = Math.abs(this.voltage) + ' V'; });
+      $('mc').addEventListener('change', e => { this.commutator = e.target.checked; });
+      $('mr').addEventListener('click', () => { this.voltage = -this.voltage; });
+    },
+    step(dt) {
+      // phi = angle of the coil plane measured from the magnetic field direction.
+      // Torque ∝ I·cos(phi). The commutator flips the current every half turn so torque keeps the same sign.
+      const R = 2, k = 0.6, J = 0.02, friction = 0.04;
+      const cos = Math.cos(this.phi);
+      const flip = this.commutator ? (cos >= 0 ? 1 : -1) : 1;
+      const backEmf = k * this.omega * cos; // EMF induced in the coil; the commutator flips it at the terminals too
+      this.current = flip * (this.voltage - flip * backEmf) / R;
+      const torque = k * this.current * cos;
+      this.omega += (torque - friction * this.omega) / J * dt;
+      this.phi += this.omega * dt;
+    },
+    phaseAt() {
+      if (this.voltage === 0) return 3;
+      const torque = this.current * Math.cos(this.phi);
+      if (!this.commutator && torque * this.omega < 0) return 2;
+      if (this.commutator && Math.abs(Math.cos(this.phi)) < 0.15 && Math.abs(this.omega) < 3) return 1;
+      return 0;
+    },
+    phases: [
+      { name: 'Pushing round', text: 'Current flows through the coil. One side is pushed <b>up</b> and the other side is pushed <b>down</b> by the magnetic field, so the coil turns.' },
+      { name: 'Commutator switches', text: 'The coil is upright and the forces just stretch it. Here the commutator gaps pass the brushes and the current through the coil <b>reverses</b>, so the next half-turn pushes the same way. Momentum carries it past.' },
+      { name: 'Pushing back', text: 'Without a commutator the current never reverses. After half a turn the forces push the coil <b>backwards</b>, so it rocks and settles upright instead of spinning.' },
+      { name: 'No current', text: 'With no voltage there is no current, so there is no magnetic force on the coil. Turn the voltage up.' },
+    ],
+    explain() { return this.phases[this.phaseAt()]; },
+    draw() {
+      const c = C();
+      title('DC electric motor', `${(this.omega * 60 / (2 * Math.PI)).toFixed(0)} rpm · current ${Math.abs(this.current).toFixed(2)} A`);
+      const cx = 470, cy = 420, R = 160;
+      // Magnets
+      ctx.fillStyle = '#d63b3b'; rr(cx - R - 170, cy - 160, 110, 320, 12); ctx.fill();
+      ctx.fillStyle = '#2a6fdb'; rr(cx + R + 60, cy - 160, 110, 320, 12); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 60px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText('N', cx - R - 115, cy + 22); ctx.fillText('S', cx + R + 115, cy + 22); ctx.textAlign = 'left';
+      // Field lines N → S
+      ctx.setLineDash([10, 10]); ctx.lineDashOffset = -performance.now() / 40;
+      for (let k = -2; k <= 2; k++) { ctx.strokeStyle = c.muted; ctx.lineWidth = 1.5; line(cx - R - 55, cy + k * 55, cx + R + 55, cy + k * 55); }
+      ctx.setLineDash([]);
+      for (let k = -2; k <= 2; k++) arrow(cx + R + 20, cy + k * 55, cx + R + 50, cy + k * 55, c.muted, 2);
+
+      // Coil (end view): two wire sides at ±R along the coil plane direction
+      const ux = Math.cos(this.phi), uy = -Math.sin(this.phi);
+      const A = { x: cx + ux * R * 0.8, y: cy + uy * R * 0.8 }, Bp = { x: cx - ux * R * 0.8, y: cy - uy * R * 0.8 };
+      ctx.strokeStyle = '#c87533'; ctx.lineWidth = 10; line(A.x, A.y, Bp.x, Bp.y);
+      ctx.fillStyle = c.metalLight; ctx.strokeStyle = c.ink; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      const I = this.current;
+      for (const [P, s] of [[A, 1], [Bp, -1]]) {
+        ctx.fillStyle = '#c87533'; ctx.beginPath(); ctx.arc(P.x, P.y, 26, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        // current direction: dot = out of screen, cross = into screen
+        const dir = Math.sign(I) * s;
+        ctx.fillStyle = '#fff'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 4;
+        if (Math.abs(I) > 0.01) {
+          if (dir > 0) { ctx.beginPath(); ctx.arc(P.x, P.y, 6, 0, Math.PI * 2); ctx.fill(); }
+          else { line(P.x - 9, P.y - 9, P.x + 9, P.y + 9); line(P.x - 9, P.y + 9, P.x + 9, P.y - 9); }
+          // Force: perpendicular to field (horizontal), so vertical. Out-of-screen current in a left→right field is pushed up.
+          const f = Math.min(110, Math.abs(I) * 25) * (dir > 0 ? -1 : 1);
+          arrow(P.x, P.y + Math.sign(f) * 30, P.x, P.y + f + Math.sign(f) * 30, '#1e8e5a', 6);
+        }
+      }
+      // Rotation sense
+      if (Math.abs(this.omega) > 0.2) {
+        ctx.strokeStyle = c.accent; ctx.lineWidth = 3; const s = Math.sign(this.omega);
+        ctx.beginPath(); ctx.arc(cx, cy, R + 30, -Math.PI / 2 - 0.4, -Math.PI / 2 + 0.4); ctx.stroke();
+        const a = -Math.PI / 2 - 0.4 * s;
+        arrow(cx + (R + 30) * Math.cos(a + 0.1 * s), cy + (R + 30) * Math.sin(a + 0.1 * s), cx + (R + 30) * Math.cos(a), cy + (R + 30) * Math.sin(a), c.accent, 3);
+      }
+
+      // Commutator inset
+      const ix = 980, iy = 300, ir = 60;
+      ctx.fillStyle = c.ink; ctx.font = '600 20px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText(this.commutator ? 'Commutator (end view)' : 'Slip rings (no switching)', ix, iy - 110); ctx.textAlign = 'left';
+      if (this.commutator) {
+        for (let h = 0; h < 2; h++) {
+          ctx.fillStyle = h ? '#b87333' : '#d9a066'; ctx.strokeStyle = c.ink; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(ix, iy, ir, -this.phi + Math.PI / 2 + h * Math.PI + 0.12, -this.phi + Math.PI / 2 + (h + 1) * Math.PI - 0.12);
+          ctx.arc(ix, iy, ir - 22, -this.phi + Math.PI / 2 + (h + 1) * Math.PI - 0.12, -this.phi + Math.PI / 2 + h * Math.PI + 0.12, true);
+          ctx.closePath(); ctx.fill(); ctx.stroke();
+        }
+      } else {
+        ctx.fillStyle = '#d9a066'; ctx.strokeStyle = c.ink; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(ix, iy, ir, 0, Math.PI * 2); ctx.arc(ix, iy, ir - 22, 0, Math.PI * 2, true); ctx.fill(); ctx.stroke();
+      }
+      // Brushes
+      ctx.fillStyle = '#444';
+      ctx.fillRect(ix - ir - 40, iy - 14, 40, 28); ctx.fillRect(ix + ir, iy - 14, 40, 28);
+      ctx.fillStyle = c.ink; ctx.font = 'bold 24px system-ui'; ctx.textAlign = 'center';
+      const pos = this.voltage >= 0;
+      ctx.fillText(pos ? '+' : '−', ix - ir - 20, iy - 26); ctx.fillText(pos ? '−' : '+', ix + ir + 20, iy - 26); ctx.textAlign = 'left';
+      // Battery
+      ctx.strokeStyle = c.ink; ctx.lineWidth = 3;
+      line(ix - ir - 40, iy, ix - ir - 70, iy); line(ix - ir - 70, iy, ix - ir - 70, iy + 140); line(ix - ir - 70, iy + 140, ix - 14, iy + 140);
+      line(ix + ir + 40, iy, ix + ir + 70, iy); line(ix + ir + 70, iy, ix + ir + 70, iy + 140); line(ix + ir + 70, iy + 140, ix + 14, iy + 140);
+      ctx.lineWidth = 5; line(ix - 14, iy + 115, ix - 14, iy + 165); line(ix + 14, iy + 128, ix + 14, iy + 152);
+      ctx.fillStyle = c.ink; ctx.font = '18px system-ui'; ctx.textAlign = 'center'; ctx.fillText(`${Math.abs(this.voltage)} V`, ix, iy + 200); ctx.textAlign = 'left';
+
+      // Torque meter
+      const tq = 0.6 * this.current * Math.cos(this.phi);
+      ctx.fillStyle = c.ink; ctx.font = '600 20px system-ui'; ctx.fillText('Turning force (torque)', 860, 600);
+      ctx.fillStyle = c.body; rr(860, 615, 240, 24, 6); ctx.fill();
+      ctx.fillStyle = tq * Math.sign(this.omega || 1) >= 0 ? '#1e8e5a' : '#d63b3b';
+      const tw = Math.max(-120, Math.min(120, tq * 40));
+      ctx.fillRect(980 + Math.min(0, tw), 617, Math.abs(tw), 20);
+      ctx.fillStyle = c.ink; ctx.fillRect(979, 612, 2, 30);
+
+      callout(A.x, A.y - 26, 200, 170, 'Coil side');
+      callout(cx - R - 115, cy - 160, 210, 230, 'Permanent magnet');
+      callout(cx, cy + 3 * 55, 260, 720, 'Magnetic field (N → S)');
+      callout(ix - ir - 20, iy + 14, ix - ir - 90, iy + 80, 'Brush');
+      if (Math.abs(I) > 0.01) callout(A.x + 20, A.y + (I > 0 ? -60 : 60), 760, 150, 'Force on wire');
+    },
+  };
+
+  // ======================================================================
+  // 3. Pin-tumbler lock
+  // ======================================================================
+  const KEYS = {
+    correct: { name: 'The right key', cuts: null },
+    wrong:   { name: 'A wrong key', cuts: [340, 360, 330, 345, 365] },
+    blank:   { name: 'Uncut blank', cuts: [300, 300, 300, 300, 300] },
+  };
+  const lock = {
+    name: 'Pin-tumbler lock', blurb: 'Why only the right key opens a door',
+    simulated: true,
+    insert: 0, target: 1, keyId: 'correct', turn: 0, turning: false, wiggle: 0,
+    pinX: [470, 560, 650, 740, 830], keyPin: [55, 80, 45, 70, 90], driver: 55,
+    shear: 280, rest: 395, tipFull: 900, blade: 560,
+    tipAt() { return 340 + this.insert * (this.tipFull - 340); },
+    facts: ['Each pin stack is split in two. The gap must line up exactly with the <b>shear line</b>, the edge between the plug and the housing.', 'With 5 pins and 6 possible heights there are 6⁵ = 7,776 different keys.', 'Lock picking works by lifting each pin to the shear line one at a time while gently turning the plug.'],
+    extra() {
+      return `<label>Key <select id="lk">${Object.entries(KEYS).map(([k, v]) => `<option value="${k}" ${k === this.keyId ? 'selected' : ''}>${v.name}</option>`).join('')}</select></label>
+        <label><button id="lin">Insert key</button><button id="lout">Pull out</button><button id="lturn" class="primary">Turn</button></label>`;
+    },
+    bind() {
+      $('lk').addEventListener('change', e => { this.keyId = e.target.value; this.target = 0; this.turn = 0; this.turning = false; });
+      $('lin').addEventListener('click', () => { if (this.turn < 0.01) this.target = 1; });
+      $('lout').addEventListener('click', () => { if (this.turn < 0.01) { this.target = 0; this.turning = false; } });
+      $('lturn').addEventListener('click', () => {
+        if (this.aligned() && this.insert > 0.999) this.turning = !this.turning; else this.wiggle = 0.6;
+      });
+    },
+    cutsY() { return KEYS[this.keyId].cuts || this.keyPin.map(L => this.shear + L); },
+    keyTopAt(x) {
+      // Key profile as a function of distance u from the key tip.
+      const tip = this.tipAt();
+      const u = tip - x;
+      if (u < 0 || u > this.blade) return Infinity;
+      const pts = [[0, 405], [30, 330]];
+      const cuts = this.cutsY();
+      this.pinX.slice().reverse().forEach((px, i) => {
+        const o = this.tipFull - px, y = cuts[this.pinX.length - 1 - i];
+        pts.push([o - 14, y], [o + 14, y]);
+      });
+      pts.push([this.tipFull - this.pinX[0] + 50, 300], [9999, 300]);
+      for (let i = 1; i < pts.length; i++) if (u <= pts[i][0]) {
+        const [u0, y0] = pts[i - 1], [u1, y1] = pts[i];
+        return y0 + (y1 - y0) * (u - u0) / (u1 - u0);
+      }
+      return 300;
+    },
+    pinState() {
+      return this.pinX.map((x, i) => {
+        const bottom = Math.min(this.rest, this.keyTopAt(x));
+        const gap = bottom - this.keyPin[i]; // top of key pin
+        return { x, bottom, gap, ok: Math.abs(gap - this.shear) < 3 };
+      });
+    },
+    aligned() { return this.pinState().every(p => p.ok); },
+    step(dt) {
+      if (this.turn < 0.01) this.insert += Math.sign(this.target - this.insert) * Math.min(Math.abs(this.target - this.insert), dt * 0.5);
+      const goal = this.turning ? 1 : 0;
+      this.turn += Math.sign(goal - this.turn) * Math.min(Math.abs(goal - this.turn), dt * 1.2);
+      this.wiggle = Math.max(0, this.wiggle - dt);
+    },
+    phaseAt() {
+      if (this.turn > 0.01) return 3;
+      if (this.wiggle > 0) return 4;
+      if (this.insert < 0.02) return 0;
+      if (this.insert < 0.999) return 1;
+      return this.aligned() ? 2 : 4;
+    },
+    phases: [
+      { name: 'No key', text: 'Springs push every pin stack down. The upper <b>driver pins</b> cross the shear line and jam the plug, so it cannot turn.' },
+      { name: 'Inserting the key', text: 'As the key slides in, its ramps lift each pin stack up and down. Watch the pins ride over the cuts.' },
+      { name: 'Pins at the shear line', text: 'Every cut is exactly the right depth, so every gap between key pin and driver pin lines up with the <b>shear line</b>. Press <b>Turn</b>!' },
+      { name: 'Turning', text: 'Nothing crosses the shear line now, so the plug rotates inside the housing. The cam at the back pulls the bolt and the door opens.' },
+      { name: 'Blocked', text: 'At least one pin stack (shown in red) crosses the shear line. Either a driver pin pokes down into the plug or a key pin sticks up into the housing, so the plug cannot turn.' },
+    ],
+    explain() { return this.phases[this.phaseAt()]; },
+    draw() {
+      const c = C();
+      title('Pin-tumbler lock', this.phases[this.phaseAt()].name);
+      const pins = this.pinState();
+      const top = 120, plugBottom = 430, x0 = 380, x1 = 920;
+      const turned = this.turn > 0.01;
+      const shake = this.wiggle > 0 ? Math.sin(this.wiggle * 60) * 3 : 0;
+      // Housing
+      ctx.fillStyle = c.metal; ctx.strokeStyle = c.ink; ctx.lineWidth = 3;
+      ctx.fillRect(x0, top, x1 - x0, this.shear - top); ctx.strokeRect(x0, top, x1 - x0, this.shear - top);
+      ctx.fillRect(x0, plugBottom, x1 - x0, 50); ctx.strokeRect(x0, plugBottom, x1 - x0, 50);
+      // Plug
+      ctx.fillStyle = turned ? c.metalDark : c.brass;
+      ctx.save(); ctx.translate(0, shake);
+      ctx.fillRect(x0, this.shear, x1 - x0, plugBottom - this.shear); ctx.strokeRect(x0, this.shear, x1 - x0, plugBottom - this.shear);
+      // Keyway
+      ctx.fillStyle = c.bg; ctx.fillRect(x0, 290, x1 - x0 - 10, 125);
+      ctx.restore();
+      // Pin chambers
+      for (const p of pins) { ctx.fillStyle = c.bg; ctx.fillRect(p.x - 18, top + 10, 36, this.rest - top - 5); }
+
+      // Key
+      const tip = this.tipAt(), start = tip - this.blade;
+      ctx.fillStyle = '#c0c6cc'; ctx.strokeStyle = c.ink; ctx.lineWidth = 2;
+      // Key bow (the part you hold)
+      ctx.beginPath(); ctx.arc(start - 80, 352, 90, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = c.bg; ctx.beginPath(); ctx.arc(start - 110, 352, 22, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#c0c6cc';
+      ctx.beginPath(); ctx.moveTo(start - 10, 300);
+      for (let x = start; x <= tip; x += 4) ctx.lineTo(x, Math.min(this.keyTopAt(x), 405));
+      ctx.lineTo(tip, 405); ctx.lineTo(start - 10, 405); ctx.closePath(); ctx.fill(); ctx.stroke();
+
+      // Pins and springs
+      for (let i = 0; i < pins.length; i++) {
+        const p = pins[i]; const bad = !p.ok && (this.insert > 0.999 || this.wiggle > 0);
+        // key pin (pointed bottom)
+        ctx.fillStyle = bad ? c.red : c.brass; ctx.strokeStyle = c.ink; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(p.x - 14, p.gap); ctx.lineTo(p.x + 14, p.gap); ctx.lineTo(p.x + 14, p.bottom - 10); ctx.lineTo(p.x, p.bottom); ctx.lineTo(p.x - 14, p.bottom - 10); ctx.closePath(); ctx.fill(); ctx.stroke();
+        // driver pin
+        const dTop = p.gap - this.driver;
+        ctx.fillStyle = bad ? c.red : c.metalLight; rr(p.x - 14, dTop, 28, this.driver, 4); ctx.fill(); ctx.stroke();
+        // spring
+        ctx.strokeStyle = c.muted; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(p.x, top + 10);
+        const coils = 8, span = dTop - (top + 10);
+        for (let k = 1; k <= coils * 2; k++) ctx.lineTo(p.x + (k % 2 ? 12 : -12), top + 10 + span * k / (coils * 2));
+        ctx.lineTo(p.x, dTop); ctx.stroke();
+      }
+      // Shear line
+      ctx.strokeStyle = this.aligned() ? '#1e8e5a' : c.red; ctx.lineWidth = 2; ctx.setLineDash([10, 8]);
+      line(x0 - 40, this.shear, x1 + 40, this.shear); ctx.setLineDash([]);
+
+      // Front view inset showing plug rotation
+      const fx = 1060, fy = 320, fr = 80, ang = this.turn * Math.PI / 2 + shake * 0.01;
+      ctx.fillStyle = c.metal; ctx.strokeStyle = c.ink; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(fx, fy, fr + 30, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = c.brass; ctx.beginPath(); ctx.arc(fx, fy, fr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.save(); ctx.translate(fx, fy); ctx.rotate(ang);
+      ctx.fillStyle = c.bg; ctx.fillRect(-8, -10, 16, 70);
+      ctx.restore();
+      ctx.fillStyle = c.ink; ctx.font = '600 18px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText('Front view', fx, fy - fr - 45);
+      ctx.fillText(turned && this.turn > 0.95 ? '🔓 Unlocked' : '🔒 Locked', fx, fy + fr + 60); ctx.textAlign = 'left';
+
+      callout(pins[0].x - 14, this.shear, 220, 250, 'Shear line');
+      callout(pins[0].x - 14, pins[0].gap - this.driver / 2, 250, 170, 'Driver pin');
+      callout(pins[4].x, pins[4].bottom - 10, 960, 520, 'Key pin');
+      callout(pins[2].x + 12, top + 40, 760, 90, 'Spring');
+      callout(600, plugBottom - 10, 600, 560, 'Plug (turns)');
+      callout(850, top + 30, 1000, 120, 'Housing (fixed)');
+      if (this.insert > 0.1) callout(Math.min(tip - 60, 600), 400, 360, 560, 'Key');
+    },
+  };
+
+  // ======================================================================
+  // Shell: machine picker, playback, scrubbing, explanation panel
+  // ======================================================================
+  const MACHINES = [engine, motor, lock];
+  let current = engine, t = 0, playing = true, speed = 0.5;
+
+  function select(m) {
+    current = m; t = 0;
+    playing = true; $('play').textContent = 'Pause';
+    for (const b of $('machines').children) b.classList.toggle('active', b._m === m);
+    $('scrubRow').style.display = m.simulated ? 'none' : '';
+    $('extra').innerHTML = (m.extra ? m.extra() : '') + `<h3>Did you know?</h3><ul class="facts">${m.facts.map(f => `<li>${f}</li>`).join('')}</ul>`;
+    if (m.bind) m.bind();
+    lastExplain = null;
+  }
+  MACHINES.forEach(m => {
+    const b = document.createElement('button'); b._m = m;
+    b.innerHTML = `<b>${m.name}</b><small>${m.blurb}</small>`;
+    b.addEventListener('click', () => select(m));
+    $('machines').appendChild(b);
+  });
+
+  $('play').addEventListener('click', () => { playing = !playing; $('play').textContent = playing ? 'Pause' : 'Play'; });
+  $('stepBtn').addEventListener('click', () => {
+    playing = false; $('play').textContent = 'Play';
+    if (current.simulated) for (let k = 0; k < 6; k++) current.step(1 / 60);
+    else t = (Math.floor(t * 4 + 1e-6) + 1) / 4 % 1; // jump to next stroke
+  });
+  $('speed').addEventListener('input', e => { speed = +e.target.value; $('speedVal').textContent = speed + '×'; });
+  $('scrub').addEventListener('input', e => { t = +e.target.value; playing = false; $('play').textContent = 'Play'; });
+  cv.addEventListener('click', e => {
+    // Clicking the engine's stroke timeline jumps to that stroke.
+    if (current !== engine) return;
+    const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width, y = (e.clientY - r.top) * H / r.height;
+    if (y > 730 && x > 100 && x < 1100) { t = (x - 100) / 1000; playing = false; $('play').textContent = 'Play'; }
+  });
+
+  let lastExplain = null;
+  function updateExplain() {
+    const e = current.explain(t);
+    if (e === lastExplain) return;
+    lastExplain = e;
+    $('explain').innerHTML = `<h3>${current.name}</h3><div class="step"><b>${e.name}</b><br>${e.text}</div>`;
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now;
+    if (playing) {
+      if (current.simulated) { const n = 4; for (let k = 0; k < n; k++) current.step(dt * speed * 2 / n); }
+      else { t = (t + dt * speed / current.period) % 1; $('scrub').value = t; }
+    }
+    ctx.clearRect(0, 0, W, H);
+    current.draw(t);
+    updateExplain();
+    requestAnimationFrame(frame);
+  }
+  select(engine);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

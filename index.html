@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Science Studio</title>
+<link rel="stylesheet" href="common.css">
+<style>
+  main { max-width: 1000px; margin: 0 auto; padding: 32px 16px; }
+  .hero h1 { font-size: 30px; margin: 0 0 6px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 24px; }
+  .card { text-decoration: none; color: inherit; display: block; transition: border-color .15s; }
+  .card:hover { border-color: var(--accent); }
+  .card .icon { font-size: 34px; }
+  .card h2 { text-transform: none; letter-spacing: 0; font-size: 18px; color: var(--ink); margin: 8px 0 4px; }
+  .card ul { padding-left: 18px; margin: 8px 0 0; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="hero">
+    <h1>Science Studio</h1>
+    <p class="muted">Interactive tools for learning by doing: mix chemicals, build circuits and look inside machines. Everything runs in the browser with no installs and no internet connection needed.</p>
+  </div>
+  <div class="grid">
+    <a class="card panel" href="chemistry-lab/index.html">
+      <div class="icon">⚗️</div>
+      <h2>Virtual Chemistry Lab</h2>
+      <p class="muted small">Pour acids, bases, salts and metals into a beaker and watch the reactions happen.</p>
+      <ul>
+        <li>Neutralisation, precipitation, displacement and gas reactions</li>
+        <li>Live pH meter, thermometer and indicators</li>
+        <li>Titration curve plotted as you add reagent</li>
+      </ul>
+    </a>
+    <a class="card panel" href="circuit-lab/index.html">
+      <div class="icon">🔌</div>
+      <h2>Circuit Lab</h2>
+      <p class="muted small">Draw circuits on a grid and watch the current flow.</p>
+      <ul>
+        <li>Batteries, resistors, bulbs, LEDs, switches, capacitors, motors</li>
+        <li>Real nodal analysis solver with live voltages and currents</li>
+        <li>Animated current, glowing bulbs, LEDs that burn out</li>
+      </ul>
+    </a>
+    <a class="card panel" href="how-it-works/index.html">
+      <div class="icon">⚙️</div>
+      <h2>How It Works</h2>
+      <p class="muted small">Animated, labelled cutaways of everyday machines.</p>
+      <ul>
+        <li>Four-stroke engine, DC motor, pin-tumbler lock</li>
+        <li>Play, pause, slow down and scrub through each cycle</li>
+        <li>Step-by-step explanations synced to the animation</li>
+      </ul>
+    </a>
+  </div>
+</main>
+</body>
+</html>

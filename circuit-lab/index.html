@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Circuit Lab</title>
+<link rel="stylesheet" href="../common.css">
+<style>
+  .tools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .tools button { text-align: left; font-size: 14px; }
+  #board { aspect-ratio: 3 / 2; cursor: crosshair; }
+  .hint { font-size: 13px; color: var(--muted); }
+  #props label { display: block; font-size: 13px; color: var(--muted); margin-top: 8px; }
+  #props input[type=number] { width: 100%; }
+  .warn { color: var(--warn); font-weight: 600; }
+  .good { color: var(--good); font-weight: 600; }
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="home" href="../index.html">← Science Studio</a>
+  <h1>Circuit Lab</h1>
+  <span class="sub">Pick a part, then drag between two dots on the board to place it.</span>
+</header>
+<div class="layout">
+  <aside class="panel">
+    <h2>Parts</h2>
+    <div class="tools" id="tools"></div>
+    <p class="hint">Use <b>Select</b> to click a part and edit it. Click a switch to flip it. <kbd>Del</kbd> removes the selected part.</p>
+    <h3>Example circuits</h3>
+    <div class="stack" id="examples"></div>
+    <h3>Board</h3>
+    <div class="row">
+      <button id="clear">Clear board</button>
+      <label class="small row" style="gap:6px"><input type="checkbox" id="showV" checked> Voltage colours</label>
+    </div>
+  </aside>
+  <section class="stack">
+    <canvas id="board" width="1200" height="800" aria-label="Circuit board"></canvas>
+    <div class="row small">
+      <span>Current animation speed</span>
+      <input type="range" id="speed" min="0" max="3" step="0.1" value="1">
+      <span class="muted">Moving dots show conventional current (+ to −). Faster dots = more current.</span>
+    </div>
+  </section>
+  <aside class="panel">
+    <h2>Inspector</h2>
+    <div id="props" class="small"><p class="muted">Select a part to see its voltage, current and power.</p></div>
+    <h3>Circuit status</h3>
+    <div id="status" class="small"></div>
+    <h3>Ideas to try</h3>
+    <ul class="small muted" style="padding-left:18px;margin:0">
+      <li>Put two bulbs in series, then in parallel. Which arrangement is brighter?</li>
+      <li>Connect an LED with no resistor. What happens? Now add 220 Ω.</li>
+      <li>Charge a capacitor through a 1 kΩ resistor and watch the voltage creep up.</li>
+      <li>Reverse an LED. Does current flow?</li>
+      <li>Short a battery with a wire and look at the current.</li>
+    </ul>
+  </aside>
+</div>
+
+<script>
+(() => {
+  const GRID = 50;
+  const cv = document.getElementById('board'), ctx = cv.getContext('2d');
+  const COLS = Math.floor(cv.width / GRID) - 1, ROWS = Math.floor(cv.height / GRID) - 1;
+
+  // ---------- Part library ----------
+  // value: the editable parameter for the part.
+  const TYPES = {
+    wire:      { name: 'Wire',      icon: '—' },
+    battery:   { name: 'Battery',   icon: '🔋', value: 9,    unit: 'V',  label: 'Voltage' },
+    resistor:  { name: 'Resistor',  icon: '▭',  value: 220,  unit: 'Ω',  label: 'Resistance' },
+    bulb:      { name: 'Bulb',      icon: '💡', value: 30,   unit: 'Ω',  label: 'Filament resistance' },
+    led:       { name: 'LED',       icon: '🔴', value: 2.0,  unit: 'V',  label: 'Forward voltage' },
+    switch:    { name: 'Switch',    icon: '⏻' },
+    capacitor: { name: 'Capacitor', icon: '‖',  value: 1000, unit: 'µF', label: 'Capacitance' },
+    motor:     { name: 'Motor',     icon: '⚙️', value: 15,   unit: 'Ω',  label: 'Coil resistance' },
+  };
+  const LED_COLORS = ['#ff3b30', '#34c759', '#0a84ff', '#ffcc00'];
+  const LED_MAX_A = 0.05;    // LEDs burn out above 50 mA
+  const BATTERY_R = 0.1;     // internal resistance
+  const WIRE_R = 0.001;
+  const OPEN_G = 1e-9;
+
+  let parts = [];
+  let tool = 'wire';
+  let selected = null;
+  let drag = null;
+  let hoverPt = null;
+  let nextId = 1;
+
+  // ---------- Toolbar ----------
+  const toolsEl = document.getElementById('tools');
+  const toolList = [['select', 'Select', '👆'], ...Object.entries(TYPES).map(([k, t]) => [k, t.name, t.icon])];
+  for (const [k, name, icon] of toolList) {
+    const b = document.createElement('button');
+    b.dataset.tool = k; b.textContent = `${icon}  ${name}`;
+    b.addEventListener('click', () => setTool(k));
+    toolsEl.appendChild(b);
+  }
+  function setTool(k) {
+    tool = k;
+    for (const b of toolsEl.children) b.classList.toggle('active', b.dataset.tool === k);
+    cv.style.cursor = k === 'select' ? 'pointer' : 'crosshair';
+  }
+  setTool('wire');
+
+  function addPart(type, a, b, extra = {}) {
+    const p = { id: nextId++, type, a, b, value: TYPES[type].value, closed: true, vPrev: 0, burnt: false, phase: 0, angle: 0, color: LED_COLORS[0], ...extra };
+    parts.push(p); return p;
+  }
+
+  // ---------- Solver: nodal analysis with Norton equivalents ----------
+  // Every part becomes a conductance between two nodes plus an optional current source.
+  // LEDs are piecewise-linear and solved iteratively; capacitors use backward Euler.
+  let sim = { nodeV: new Map(), ok: true, shorted: false };
+  const key = p => p.x + ',' + p.y;
+
+  function stamp(p, dt) {
+    const T = p.type;
+    if (T === 'wire') return { g: 1 / WIRE_R, i: 0 };
+    if (T === 'switch') return p.closed ? { g: 1 / WIRE_R, i: 0 } : { g: OPEN_G, i: 0 };
+    if (T === 'resistor' || T === 'bulb' || T === 'motor') return { g: 1 / Math.max(1e-3, p.value), i: 0 };
+    // i: internal source current from a to b, so the part current a→b = g·(va − vb) + i
+    if (T === 'battery') return { g: 1 / BATTERY_R, i: p.value / BATTERY_R }; // + terminal is end b
+    if (T === 'capacitor') { const g = (p.value * 1e-6) / dt; return { g, i: -g * p.vPrev }; } // i = C·(v − vPrev)/dt
+    if (T === 'led') {
+      if (p.burnt || !p.on) return { g: OPEN_G, i: 0 };
+      const g = 1 / 10; // conducting: i = (v − Vf) / 10 Ω
+      return { g, i: -g * p.value };
+    }
+  }
+  function partCurrent(p, va, vb, dt) {
+    const s = stamp(p, dt);
+    return s.g * (va - vb) + s.i;
+  }
+
+  function solve(dt) {
+    // Build node index
+    const idx = new Map();
+    for (const p of parts) for (const pt of [p.a, p.b]) if (!idx.has(key(pt))) idx.set(key(pt), idx.size);
+    const n = idx.size;
+    sim.nodeV = new Map();
+    if (n === 0) return;
+    for (const p of parts) if (p.type === 'led' && p.on === undefined) p.on = false;
+
+    let V = new Float64Array(n);
+    for (let iter = 0; iter < 30; iter++) {
+      const G = Array.from({ length: n }, () => new Float64Array(n));
+      const I = new Float64Array(n);
+      for (let k = 0; k < n; k++) G[k][k] += 1e-9; // keeps floating nodes solvable
+      G[0][0] += 1; // reference node
+      for (const p of parts) {
+        const a = idx.get(key(p.a)), b = idx.get(key(p.b));
+        if (a === b) continue;
+        const s = stamp(p, dt);
+        G[a][a] += s.g; G[b][b] += s.g; G[a][b] -= s.g; G[b][a] -= s.g;
+        I[a] -= s.i; I[b] += s.i;
+      }
+      V = gauss(G, I);
+      if (!V) { sim.ok = false; return; }
+      // Update LED states; stop when stable
+      let changed = false;
+      for (const p of parts) if (p.type === 'led' && !p.burnt) {
+        const vd = V[idx.get(key(p.a))] - V[idx.get(key(p.b))];
+        const on = p.on ? vd > p.value - 1e-6 : vd > p.value;
+        if (on !== p.on) { p.on = on; changed = true; }
+      }
+      if (!changed) break;
+    }
+    sim.ok = true;
+    for (const [k, i] of idx) sim.nodeV.set(k, V[i]);
+    // Currents and side-effects
+    sim.shorted = false;
+    for (const p of parts) {
+      const va = sim.nodeV.get(key(p.a)), vb = sim.nodeV.get(key(p.b));
+      p.v = va - vb;
+      p.i = partCurrent(p, va, vb, dt);
+      if (p.type === 'capacitor') p.vPrev = p.v;
+      if (p.type === 'led' && !p.burnt && Math.abs(p.i) > LED_MAX_A) { p.burnt = true; p.on = false; }
+      if (p.type === 'battery' && Math.abs(p.i) > 20) sim.shorted = true;
+    }
+  }
+  function gauss(A, b) {
+    const n = b.length; const M = A.map((r, i) => { const x = new Float64Array(n + 1); x.set(r); x[n] = b[i]; return x; });
+    for (let c = 0; c < n; c++) {
+      let piv = c;
+      for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+      if (Math.abs(M[piv][c]) < 1e-15) return null;
+      [M[c], M[piv]] = [M[piv], M[c]];
+      for (let r = c + 1; r < n; r++) {
+        const f = M[r][c] / M[c][c]; if (!f) continue;
+        for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k];
+      }
+    }
+    const x = new Float64Array(n);
+    for (let r = n - 1; r >= 0; r--) { let s = M[r][n]; for (let k = r + 1; k < n; k++) s -= M[r][k] * x[k]; x[r] = s / M[r][r]; }
+    return x;
+  }
+
+  // ---------- Geometry helpers ----------
+  const toPx = pt => ({ x: (pt.x + 1) * GRID, y: (pt.y + 1) * GRID });
+  function evtPos(e) {
+    const r = cv.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height };
+  }
+  function snap(m) {
+    return { x: Math.max(0, Math.min(COLS - 1, Math.round(m.x / GRID - 1))), y: Math.max(0, Math.min(ROWS - 1, Math.round(m.y / GRID - 1))) };
+  }
+  function distToSeg(m, p) {
+    const A = toPx(p.a), Bp = toPx(p.b);
+    const dx = Bp.x - A.x, dy = Bp.y - A.y, L2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((m.x - A.x) * dx + (m.y - A.y) * dy) / L2));
+    return Math.hypot(m.x - (A.x + t * dx), m.y - (A.y + t * dy));
+  }
+  function partAt(m) {
+    let best = null, bd = 18;
+    for (const p of parts) { const d = distToSeg(m, p); if (d < bd) { bd = d; best = p; } }
+    return best;
+  }
+
+  // ---------- Input ----------
+  cv.addEventListener('pointerdown', e => {
+    const m = evtPos(e);
+    if (tool === 'select') {
+      const p = partAt(m);
+      if (p && p.type === 'switch') p.closed = !p.closed;
+      selected = p; renderProps(); return;
+    }
+    drag = { from: snap(m), to: snap(m) };
+    cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener('pointermove', e => {
+    const m = evtPos(e); hoverPt = snap(m);
+    if (drag) drag.to = snap(m);
+    cv._mouse = m;
+  });
+  cv.addEventListener('pointerup', () => {
+    if (!drag) return;
+    const { from, to } = drag; drag = null;
+    if (from.x === to.x && from.y === to.y) {
+      // a click without dragging selects whatever is there
+      const p = partAt(cv._mouse || toPx(from)); selected = p; renderProps(); return;
+    }
+    const p = addPart(tool, from, to);
+    if (tool === 'led') p.color = LED_COLORS[parts.filter(q => q.type === 'led').length % LED_COLORS.length];
+    selected = p; renderProps();
+  });
+  cv.addEventListener('pointerleave', () => { hoverPt = null; cv._mouse = null; });
+  window.addEventListener('keydown', e => {
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selected && document.activeElement.tagName !== 'INPUT') {
+      parts = parts.filter(p => p !== selected); selected = null; renderProps();
+    }
+  });
+  document.getElementById('clear').addEventListener('click', () => { parts = []; selected = null; renderProps(); });
+
+  // ---------- Inspector ----------
+  const fmt = (x, u) => {
+    const a = Math.abs(x);
+    if (a >= 1) return x.toFixed(2) + ' ' + u;
+    if (a >= 1e-3) return (x * 1e3).toFixed(1) + ' m' + u;
+    if (a >= 1e-6) return (x * 1e6).toFixed(1) + ' µ' + u;
+    return '0 ' + u;
+  };
+  function renderProps() {
+    const el = document.getElementById('props');
+    if (!selected) { el.innerHTML = '<p class="muted">Select a part to see its voltage, current and power.</p>'; return; }
+    const t = TYPES[selected.type];
+    let html = `<b>${t.name} #${selected.id}</b><div class="readout" id="live" style="margin-top:8px"></div>`;
+    if (t.value !== undefined) html += `<label>${t.label} (${t.unit})<input type="number" id="val" step="any" min="0" value="${selected.value}"></label>`;
+    if (selected.type === 'switch') html += `<p><button id="toggle">${selected.closed ? 'Open switch' : 'Close switch'}</button></p>`;
+    if (selected.type === 'led') html += `<label>Colour <select id="ledc">${LED_COLORS.map(c => `<option value="${c}" ${c === selected.color ? 'selected' : ''}>${{ '#ff3b30': 'Red', '#34c759': 'Green', '#0a84ff': 'Blue', '#ffcc00': 'Yellow' }[c]}</option>`).join('')}</select></label>`;
+    if (selected.burnt) html += `<p class="warn">Burnt out! Too much current flowed. <button id="fix">Replace LED</button></p>`;
+    html += `<p class="row" style="margin-top:12px"><button id="flip">Reverse direction</button><button id="del">Delete</button></p>`;
+    el.innerHTML = html;
+    const q = id => document.getElementById(id);
+    if (q('val')) q('val').addEventListener('input', e => { const v = parseFloat(e.target.value); if (isFinite(v) && v >= 0) selected.value = v; });
+    if (q('toggle')) q('toggle').addEventListener('click', () => { selected.closed = !selected.closed; renderProps(); });
+    if (q('ledc')) q('ledc').addEventListener('change', e => { selected.color = e.target.value; });
+    if (q('fix')) q('fix').addEventListener('click', () => { selected.burnt = false; selected.on = false; renderProps(); });
+    q('flip').addEventListener('click', () => { [selected.a, selected.b] = [selected.b, selected.a]; selected.vPrev = -selected.vPrev; });
+    q('del').addEventListener('click', () => { parts = parts.filter(p => p !== selected); selected = null; renderProps(); });
+  }
+  function updateLive() {
+    const live = document.getElementById('live');
+    if (live && selected && selected.v !== undefined) {
+      live.innerHTML = `<span>Voltage across</span><b>${fmt(Math.abs(selected.v), 'V')}</b>
+        <span>Current</span><b>${fmt(Math.abs(selected.i), 'A')}</b>
+        <span>Power</span><b>${fmt(Math.abs(selected.v * selected.i), 'W')}</b>`;
+    }
+    const st = document.getElementById('status');
+    const batteries = parts.filter(p => p.type === 'battery');
+    const msgs = [];
+    if (!parts.length) msgs.push('<span class="muted">Board is empty. Try an example circuit.</span>');
+    else if (!batteries.length) msgs.push('<span class="muted">No battery: nothing will flow.</span>');
+    else {
+      const total = batteries.reduce((s, b) => s + Math.abs(b.i || 0), 0);
+      msgs.push(`Battery current: <b>${fmt(total, 'A')}</b>`);
+      if (total < 1e-6) msgs.push('<span class="muted">No current. Is the loop closed?</span>');
+    }
+    if (sim.shorted) msgs.push('<span class="warn">⚠ Short circuit! A huge current is flowing through the battery.</span>');
+    const burnt = parts.filter(p => p.burnt).length;
+    if (burnt) msgs.push(`<span class="warn">${burnt} LED${burnt > 1 ? 's' : ''} burnt out. Add a resistor in series.</span>`);
+    st.innerHTML = msgs.map(m => `<div>${m}</div>`).join('');
+  }
+
+  // ---------- Drawing ----------
+  const isDark = () => matchMedia('(prefers-color-scheme: dark)').matches;
+  function voltColor(v, vmax) {
+    // Diverging: blue for low, grey mid, red for high potential.
+    if (!document.getElementById('showV').checked || vmax <= 0) return isDark() ? '#c9d1dc' : '#3b4558';
+    const t = Math.max(-1, Math.min(1, (v - vmax / 2) / (vmax / 2)));
+    const mid = isDark() ? [160, 168, 180] : [120, 128, 140];
+    const hi = [220, 60, 50], lo = [40, 110, 220];
+    const c = t > 0 ? mid.map((m, i) => m + (hi[i] - m) * t) : mid.map((m, i) => m + (lo[i] - m) * -t);
+    return `rgb(${c.map(Math.round)})`;
+  }
+
+  function draw(dt) {
+    const dark = isDark();
+    const ink = dark ? '#d5dbe5' : '#2a3242';
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = dark ? '#3a4150' : '#c8ced8';
+    for (let x = 0; x < COLS; x++) for (let y = 0; y < ROWS; y++) { const p = toPx({ x, y }); ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3); }
+
+    const vs = [...sim.nodeV.values()];
+    const vmin = vs.length ? Math.min(...vs) : 0, vmax = vs.length ? Math.max(...vs) - vmin : 0;
+    const speed = +document.getElementById('speed').value;
+
+    for (const p of parts) {
+      const A = toPx(p.a), Bp = toPx(p.b);
+      const len = Math.hypot(Bp.x - A.x, Bp.y - A.y);
+      const ang = Math.atan2(Bp.y - A.y, Bp.x - A.x);
+      const va = (sim.nodeV.get(key(p.a)) ?? 0) - vmin, vb = (sim.nodeV.get(key(p.b)) ?? 0) - vmin;
+      ctx.save(); ctx.translate(A.x, A.y); ctx.rotate(ang); partAng = ang;
+      const body = p.type === 'wire' ? 0 : Math.min(60, len - 10);
+      const s0 = (len - body) / 2, s1 = (len + body) / 2;
+      ctx.lineCap = 'round'; ctx.lineWidth = p === selected ? 7 : 4;
+      // leads coloured by node voltage
+      ctx.strokeStyle = voltColor(va, vmax); line(0, 0, s0, 0);
+      ctx.strokeStyle = voltColor(vb, vmax); line(s1, 0, len, 0);
+      if (p.type === 'wire') { ctx.strokeStyle = voltColor((va + vb) / 2, vmax); line(0, 0, len, 0); }
+      ctx.lineWidth = 3; ctx.strokeStyle = ink; ctx.fillStyle = dark ? '#1b1f27' : '#ffffff';
+      ctx.translate(len / 2, 0);
+      drawSymbol(p, body, ink, dark);
+      ctx.restore();
+
+      // Current dots
+      const I = p.i || 0;
+      if (Math.abs(I) > 1e-5 && speed > 0) {
+        const v = Math.sign(I) * Math.min(300, 20 + Math.sqrt(Math.abs(I)) * 400) * speed; // px/s
+        p.phase = (p.phase + v * dt) % 25;
+        ctx.fillStyle = '#ffb000';
+        for (let d = ((p.phase % 25) + 25) % 25; d < len; d += 25) {
+          const x = A.x + (Bp.x - A.x) * d / len, y = A.y + (Bp.y - A.y) * d / len;
+          ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    }
+
+    // Terminals
+    const ends = new Map();
+    for (const p of parts) for (const pt of [p.a, p.b]) ends.set(key(pt), (ends.get(key(pt)) || 0) + 1);
+    for (const [k, c] of ends) {
+      const [x, y] = k.split(',').map(Number); const P = toPx({ x, y });
+      ctx.fillStyle = c >= 2 ? ink : (dark ? '#ff8a7a' : '#c0392b');
+      ctx.beginPath(); ctx.arc(P.x, P.y, c >= 2 ? 5 : 4, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Drag preview and hover
+    if (drag) {
+      const A = toPx(drag.from), Bp = toPx(drag.to);
+      ctx.strokeStyle = '#2f6fde'; ctx.setLineDash([8, 6]); ctx.lineWidth = 3; line(A.x, A.y, Bp.x, Bp.y); ctx.setLineDash([]);
+    }
+    if (hoverPt && tool !== 'select') {
+      const P = toPx(hoverPt); ctx.strokeStyle = '#2f6fde'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(P.x, P.y, 9, 0, Math.PI * 2); ctx.stroke();
+    }
+    // Hover tooltip on part
+    if (cv._mouse && !drag) {
+      const p = partAt(cv._mouse);
+      if (p && p.v !== undefined) {
+        const txt = `${TYPES[p.type].name}: ${fmt(Math.abs(p.v), 'V')}, ${fmt(Math.abs(p.i), 'A')}`;
+        ctx.font = '16px system-ui'; const w = ctx.measureText(txt).width + 16;
+        const x = Math.min(cv.width - w - 4, cv._mouse.x + 14), y = Math.max(4, cv._mouse.y - 36);
+        ctx.fillStyle = dark ? '#252b36' : '#ffffff'; ctx.strokeStyle = dark ? '#3a4150' : '#cfd5de'; ctx.lineWidth = 1;
+        ctx.fillRect(x, y, w, 28); ctx.strokeRect(x, y, w, 28);
+        ctx.fillStyle = ink; ctx.fillText(txt, x + 8, y + 19);
+      }
+    }
+  }
+  function line(x1, y1, x2, y2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+
+  function drawSymbol(p, body, ink, dark) {
+    const h = body / 2;
+    switch (p.type) {
+      case 'battery': {
+        // long plate = + (end b), short plate = − (end a)
+        ctx.lineWidth = 4;
+        line(-h, 0, -6, 0); line(6, 0, h, 0);
+        line(-6, -10, -6, 10); line(6, -22, 6, 22);
+        ctx.save(); ctx.fillStyle = ink; ctx.font = 'bold 14px system-ui';
+        ctx.fillText('+', 12, -14); ctx.fillText('−', -22, -14); ctx.restore();
+        label(p.value + ' V', ink);
+        break;
+      }
+      case 'resistor': case 'motor': if (p.type === 'resistor') {
+        ctx.fillRect(-h, -10, body, 20); ctx.strokeRect(-h, -10, body, 20);
+        label(p.value >= 1000 ? (p.value / 1000) + ' kΩ' : p.value + ' Ω', ink);
+        break;
+      } else {
+        const omega = (p.i || 0) * 60;
+        p.angle += omega * 0.016;
+        ctx.beginPath(); ctx.arc(0, 0, 22, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = ink; ctx.font = 'bold 18px system-ui'; ctx.textAlign = 'center'; ctx.fillText('M', 0, 6); ctx.textAlign = 'left';
+        ctx.save(); ctx.rotate(p.angle); ctx.strokeStyle = '#e67e22'; ctx.lineWidth = 3;
+        for (let k = 0; k < 3; k++) { ctx.rotate(Math.PI * 2 / 3); line(0, -26, 0, -34); }
+        ctx.restore();
+        label(Math.abs(omega) > 0.5 ? 'spinning' : 'motor', ink);
+        break;
+      }
+      case 'bulb': {
+        const P = Math.abs((p.v || 0) * (p.i || 0));
+        const glow = Math.min(1, P / 2);
+        if (glow > 0.01) {
+          const g = ctx.createRadialGradient(0, 0, 4, 0, 0, 60 * glow + 20);
+          g.addColorStop(0, `rgba(255,220,90,${0.9 * glow})`); g.addColorStop(1, 'rgba(255,220,90,0)');
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 60 * glow + 20, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = glow > 0.01 ? `rgb(255,${230 - 30 * glow},${120 - 60 * glow})` : (dark ? '#1b1f27' : '#ffffff');
+        ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        line(-14, -14, 14, 14); line(-14, 14, 14, -14);
+        break;
+      }
+      case 'led': {
+        const I = p.on && !p.burnt ? Math.max(0, p.i || 0) : 0;
+        const glow = Math.min(1, I / 0.02);
+        if (glow > 0.02) {
+          const g = ctx.createRadialGradient(0, 0, 2, 0, 0, 45);
+          g.addColorStop(0, hexA(p.color, 0.8 * glow)); g.addColorStop(1, hexA(p.color, 0));
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 45, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = p.burnt ? '#555' : glow > 0.02 ? p.color : hexA(p.color, 0.25);
+        ctx.beginPath(); ctx.moveTo(-12, -14); ctx.lineTo(-12, 14); ctx.lineTo(12, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+        line(12, -14, 12, 14); line(-h, 0, -12, 0); line(12, 0, h, 0);
+        // emission arrows
+        ctx.lineWidth = 2; line(2, -18, 10, -28); line(10, -18, 18, -28);
+        if (p.burnt) { ctx.fillStyle = '#c0392b'; ctx.font = 'bold 14px system-ui'; ctx.fillText('💥', -8, -24); }
+        break;
+      }
+      case 'switch': {
+        line(-h, 0, -14, 0); line(14, 0, h, 0);
+        ctx.fillStyle = ink;
+        ctx.beginPath(); ctx.arc(-14, 0, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(14, 0, 4, 0, Math.PI * 2); ctx.fill();
+        if (p.closed) line(-14, 0, 14, 0); else line(-14, 0, 12, -18);
+        label(p.closed ? 'ON' : 'OFF', ink);
+        break;
+      }
+      case 'capacitor': {
+        line(-h, 0, -6, 0); line(6, 0, h, 0);
+        ctx.lineWidth = 4; line(-6, -18, -6, 18); line(6, -18, 6, 18);
+        label(p.value + ' µF  ' + Math.abs(p.v || 0).toFixed(2) + ' V', ink);
+        break;
+      }
+    }
+  }
+  let partAng = 0;
+  function label(text, ink) {
+    // keep labels upright whatever the part's orientation
+    ctx.save(); ctx.rotate(-partAng); ctx.fillStyle = ink; ctx.font = '14px system-ui'; ctx.textAlign = 'center';
+    if (Math.abs(Math.sin(partAng)) > 0.7) { ctx.textAlign = 'left'; ctx.fillText(text, 34, 5); }
+    else ctx.fillText(text, 0, 38);
+    ctx.restore();
+  }
+  function hexA(hex, a) { const v = parseInt(hex.slice(1), 16); return `rgba(${v >> 16 & 255},${v >> 8 & 255},${v & 255},${a})`; }
+
+  // ---------- Examples ----------
+  const P = (x, y) => ({ x, y });
+  const EXAMPLES = {
+    'Simple bulb circuit': () => {
+      addPart('battery', P(4, 10), P(4, 4)); addPart('wire', P(4, 4), P(10, 4));
+      addPart('bulb', P(10, 4), P(16, 4)); addPart('wire', P(16, 4), P(16, 10));
+      addPart('switch', P(16, 10), P(10, 10)); addPart('wire', P(10, 10), P(4, 10));
+    },
+    'Series vs parallel bulbs': () => {
+      addPart('battery', P(2, 6), P(2, 2)); addPart('bulb', P(2, 2), P(6, 2)); addPart('bulb', P(6, 2), P(10, 2));
+      addPart('wire', P(10, 2), P(10, 6)); addPart('wire', P(10, 6), P(2, 6));
+      addPart('battery', P(13, 6), P(13, 2)); addPart('wire', P(13, 2), P(17, 2)); addPart('wire', P(13, 6), P(17, 6));
+      addPart('bulb', P(17, 2), P(17, 6)); addPart('wire', P(17, 2), P(21, 2)); addPart('wire', P(17, 6), P(21, 6)); addPart('bulb', P(21, 2), P(21, 6));
+    },
+    'LED with resistor': () => {
+      addPart('battery', P(4, 10), P(4, 4)); addPart('resistor', P(4, 4), P(10, 4), { value: 330 });
+      addPart('led', P(10, 4), P(16, 4)); addPart('wire', P(16, 4), P(16, 10)); addPart('wire', P(16, 10), P(4, 10));
+    },
+    'RC charging': () => {
+      addPart('battery', P(4, 10), P(4, 4)); addPart('switch', P(4, 4), P(8, 4), { closed: false });
+      addPart('resistor', P(8, 4), P(14, 4), { value: 1000 }); addPart('capacitor', P(14, 4), P(14, 10), { value: 2000 });
+      addPart('wire', P(14, 10), P(4, 10));
+    },
+    'Motor with switch': () => {
+      addPart('battery', P(5, 10), P(5, 4), { value: 6 }); addPart('switch', P(5, 4), P(11, 4));
+      addPart('motor', P(11, 4), P(11, 10)); addPart('wire', P(11, 10), P(5, 10));
+    },
+  };
+  const exEl = document.getElementById('examples');
+  for (const [name, build] of Object.entries(EXAMPLES)) {
+    const b = document.createElement('button'); b.textContent = name; b.style.width = '100%'; b.style.textAlign = 'left';
+    b.addEventListener('click', () => { parts = []; selected = null; build(); renderProps(); });
+    exEl.appendChild(b);
+  }
+  EXAMPLES['Simple bulb circuit']();
+
+  // ---------- Loop ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now;
+    // several smaller solver steps per frame for stable capacitor behaviour
+    const sub = 4;
+    for (let k = 0; k < sub; k++) solve(Math.max(1e-4, dt / sub));
+    draw(dt);
+    updateLive();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
