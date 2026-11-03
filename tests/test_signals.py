@@ -39,7 +39,7 @@ def test_daily_run_is_idempotent_and_writes_plans(desk):
     assert "SWING SIGNALS" in msg and "NEW TRADES" in msg
     assert d.plans_path.exists() and d.account_path.exists()
     again = d.run(today=day, send=False)
-    assert "No new market data" in again
+    assert again.startswith("(repeat) SWING SIGNALS")  # re-run re-sends the same report, changes nothing
 
 
 def test_took_uses_plan_levels_and_rejects_bad_input(desk):

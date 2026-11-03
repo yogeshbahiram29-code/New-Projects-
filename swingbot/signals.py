@@ -258,8 +258,13 @@ class SignalDesk:
         bar_day = index_df.index[-1]
         meta = self._meta()
         if meta.get("last_bar") == bar_day.date().isoformat():
-            msg = f"No new market data since {bar_day:%d %b} (weekend/holiday?). Nothing to do."
+            # already analysed this candle (re-run or market holiday): re-send the report, change nothing
+            last = meta.get("last_message")
+            msg = (f"(repeat) {last}" if last else
+                   f"No new market data since {bar_day:%d %b} (weekend/holiday?). Nothing changed.")
             log.info(msg)
+            if send and self.n:
+                self.sent_ok = self.n.send(msg)
             return msg
         stale = (pd.Timestamp(today) - bar_day).days > 4
         fresh = {s: df for s, df in raw.items() if not df.empty and df.index[-1] >= bar_day}
@@ -387,7 +392,6 @@ class SignalDesk:
         self.plans_path.write_text(json.dumps({"for_day_after": bar_day.date().isoformat(),
                                                "plans": [p.to_dict() for p in new_plans]}, indent=2))
         meta["last_bar"] = bar_day.date().isoformat()
-        self.save_account(acct, meta)
 
         lines = [
             f"SWING SIGNALS - data to {bar_day:%a %d %b %Y}",
@@ -404,6 +408,8 @@ class SignalDesk:
             lines += ["", "Near misses (not traded):"] + [f"- {x}" for x in near]
         lines += ["", "Rules: always set the GTT stop right after you buy. Never move a stop down."]
         msg = "\n".join(lines)
+        meta["last_message"] = msg
+        self.save_account(acct, meta)
         if send and self.n:
             self.sent_ok = self.n.send(msg)
         return msg
