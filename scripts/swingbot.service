@@ -1,0 +1,18 @@
+[Unit]
+Description=SwingBot automated swing trading
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# EDIT these three lines for your server
+User=ubuntu
+WorkingDirectory=/home/ubuntu/New-Projects-
+ExecStart=/home/ubuntu/New-Projects-/.venv/bin/python -m swingbot run
+Restart=always
+RestartSec=30
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=Asia/Kolkata
+
+[Install]
+WantedBy=multi-user.target

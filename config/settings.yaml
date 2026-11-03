@@ -1,0 +1,185 @@
+# =====================================================================
+#  Swing Bot settings
+#  Every number the bot trades on lives here. Secrets go in .env only.
+# =====================================================================
+
+# backtest | paper | live
+#   paper = full pipeline with live data, simulated orders (no real money)
+#   live  = real orders on your broker account
+mode: paper
+
+# paper | groww | zerodha
+#   groww   = recommended for full automation (TOTP login, no daily manual step)
+#   zerodha = needs one manual login tap every morning (Kite Connect rule)
+broker: paper
+
+# Starting capital used by paper trading / backtests.
+# In live mode the bot reads the real cash + holdings value from the broker.
+initial_capital: 10000
+
+# LIVE SAFETY CAP: the bot treats this as its own "sub-account" inside your
+# broker account. It never commits more than this (plus its own realised
+# profits) even if your account holds more cash, and it NEVER touches shares
+# you bought yourself.
+live_capital_limit: 10000
+
+exchange: NSE
+timezone: Asia/Kolkata
+
+# ---------------------------------------------------------------------
+# Risk profiles - picked automatically by current account equity.
+# Small accounts: fixed charges (DP charge on each sell, minimum
+# brokerage) eat a big share of small positions, so the micro profile
+# holds fewer, larger positions and skips partial profit-taking (a
+# second sell on another day = a second DP charge).
+# Hard ceilings in code: risk/trade <= 2%, position <= 50%, heat <= 8%.
+# ---------------------------------------------------------------------
+risk_profiles:
+  micro:                      # equity below ₹50,000  (your ₹10k trial)
+    max_equity: 50000
+    risk_pct:      { bull: 2.0, neutral: 1.0, bear: 0.0 }
+    max_positions: { bull: 2,   neutral: 1,   bear: 0 }
+    max_position_pct: 50
+    max_portfolio_heat_pct: 4
+    partial_exit_enabled: false
+  small:                      # ₹50,000 - ₹5,00,000
+    max_equity: 500000
+    risk_pct:      { bull: 1.25, neutral: 0.6, bear: 0.0 }
+    max_positions: { bull: 5,    neutral: 3,   bear: 0 }
+    max_position_pct: 25
+    max_portfolio_heat_pct: 5
+    partial_exit_enabled: true
+  standard:                   # ₹5,00,000 and above
+    max_equity: .inf
+    risk_pct:      { bull: 1.0, neutral: 0.5, bear: 0.0 }
+    max_positions: { bull: 8,   neutral: 4,   bear: 0 }
+    max_position_pct: 20
+    max_portfolio_heat_pct: 6
+    partial_exit_enabled: true
+
+risk:
+  min_reward_risk: 2.0            # after costs; trade skipped below this
+  max_stop_distance_pct: 8        # logical stop further than this => skip
+  min_stop_distance_pct: 1.5      # tighter than this is inside normal noise
+  max_cost_share_of_reward: 0.10  # skip if charges eat >10% of the expected reward
+  max_adv_participation_pct: 1    # never buy more than 1% of avg daily volume
+  assumed_gap_pct: 10             # overnight gap we size for (beyond the stop)
+  max_gap_loss_pct: 5             # a 10% gap may cost at most 5% of the account
+  max_per_sector: 1               # micro account: one stock per sector
+  max_correlation: 0.80           # 60-day return correlation with any holding
+  max_new_entries_per_day: 2
+  max_orders_per_day: 12          # runaway-loop guard (hard ceiling 20)
+  losing_streak_reduce_after: 3   # consecutive losses => half risk
+  losing_streak_restore_after_wins: 2
+
+circuit_breakers:
+  daily_loss_pct: 2               # no new entries for the rest of the day
+  weekly_loss_pct: 4              # no new entries until next week
+  monthly_drawdown_pct: 8         # halve risk for the rest of the month
+  peak_drawdown_halt_pct: 15      # FULL STOP - needs manual `swingbot resume`
+
+# ---------------------------------------------------------------------
+# Market regime (benchmark index + breadth of the universe)
+# ---------------------------------------------------------------------
+regime:
+  benchmark: NIFTY50
+  bull_breadth_pct: 60
+  bear_breadth_pct: 40
+  shock_index_drop_pct: 3         # one-day index fall that freezes entries
+  shock_freeze_days: 2
+
+# ---------------------------------------------------------------------
+# Universe filters
+# ---------------------------------------------------------------------
+universe:
+  file: config/universe.csv       # symbol,sector ; replaced by NIFTY 500 list if downloaded
+  min_price: 50
+  min_avg_traded_value_cr: 10     # 20-day average daily traded value, in ₹ crore
+  min_history_days: 260
+  exclude: []                     # symbols you never want traded
+
+# ---------------------------------------------------------------------
+# Analysis and setups
+# ---------------------------------------------------------------------
+analysis:
+  min_score_bull: 70
+  min_score_neutral: 80
+  earnings_blackout_days: 5       # no new entry if results are due within N trading days
+
+setups:
+  pullback:   { enabled: true }
+  breakout:   { enabled: true, max_extension_pct: 5, min_volume_ratio: 1.5 }
+  mean_reversion: { enabled: false }   # off for micro accounts: small edge, eaten by charges
+
+execution:
+  entry_buffer_pct: 0.10          # buy trigger = setup trigger + 0.10%
+  entry_limit_slippage_pct: 0.50  # max we pay above the trigger
+  max_chase_pct: 2.0              # skip if price already 2% above trigger
+  no_entry_first_minutes: 15
+  no_entry_last_minutes: 10
+  stop_limit_buffer_pct: 5.0      # stop leg limit price = stop - 5% (fills even on gaps)
+  monitor_interval_seconds: 120
+  groww_oco_stop_order_type: MARKET   # falls back to LIMIT (stop - buffer) if rejected
+
+exits:
+  breakeven_at_r: 1.0
+  partial_at_r: 2.0
+  partial_fraction: 0.5
+  trail_ema: 20                   # exit on daily close below this EMA once trade is > +1R
+  chandelier_period: 22
+  chandelier_atr_mult: 3.0
+  time_stop_days: 10              # exit if +1R not reached in N trading days
+  exit_before_earnings_days: 1
+
+# ---------------------------------------------------------------------
+# Charges (approximate, delivery/CNC). Check against your contract notes.
+# ---------------------------------------------------------------------
+costs:
+  zerodha:
+    brokerage_pct: 0.0
+    brokerage_max: 0.0
+    brokerage_min: 0.0
+    dp_charge_per_sell: 15.93     # ₹13.5 + 18% GST, per stock per sell day
+  groww:
+    brokerage_pct: 0.10
+    brokerage_max: 20.0
+    brokerage_min: 5.0
+    dp_charge_per_sell: 15.93
+  paper:
+    brokerage_pct: 0.10
+    brokerage_max: 20.0
+    brokerage_min: 5.0
+    dp_charge_per_sell: 15.93
+  stt_pct: 0.10                   # both buy and sell for delivery
+  stamp_duty_buy_pct: 0.015
+  exchange_txn_pct: 0.00297
+  sebi_fee_pct: 0.0001
+  gst_pct: 18.0
+  slippage_pct: 0.10              # per side, modelled in backtests
+
+# ---------------------------------------------------------------------
+# Daily schedule (exchange local time)
+# ---------------------------------------------------------------------
+schedule:
+  pre_market: "08:45"             # login, reconcile, protection check
+  gap_guard: "09:17"              # queued exits + anything that opened below its stop
+  entries_open: "09:30"
+  cancel_unfilled: "15:20"
+  eod_scan: "16:30"               # after-close analysis -> tomorrow's plan
+  market_open: "09:15"
+  market_close: "15:30"
+  holidays: []                    # add NSE trading holidays as "YYYY-MM-DD"
+
+notifications:
+  whatsapp_provider: callmebot    # callmebot | meta | none
+  daily_report: true
+
+data:
+  provider: yfinance              # yfinance | groww | csv
+  events_file: config/events.csv  # optional manual earnings dates (symbol,date)
+  cache_dir: data_cache
+  history_days: 600
+
+paths:
+  state_dir: state
+  reports_dir: reports

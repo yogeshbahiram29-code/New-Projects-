@@ -1,6 +1,6 @@
 # Automated Swing Trading Bot — Design Plan
 
-> **Status:** Plan for review. No trading code is written yet. Development starts after you approve this plan and answer the open decisions in [Section 16](#16-decisions-needed-from-you).
+> **Status:** Plan approved and decisions answered (Section 16). Version 1 is implemented in `swingbot/`. See the [README](../README.md) for setup and the go-live checklist.
 
 > **Important:** No algorithm can guarantee profits or avoid every loss. This system is designed to do three things well: **protect capital first**, take only high-probability setups, and let winners run while cutting losers quickly. It will have losing trades and losing streaks. That's normal, and the risk rules are built to survive them.
 
@@ -39,7 +39,7 @@ Every trading day the bot runs this pipeline:
 5. **Runs the risk engine:** it calculates the stop-loss, the target, the reward-to-risk ratio and the position size. It also checks portfolio limits. **Any trade that fails any risk rule is rejected.**
 6. **Places the order** through your broker's API. **A stop-loss is placed on the broker side immediately after the fill.**
 7. **Manages the open trade:** it takes partial profit, moves the stop to breakeven, trails the stop and exits on target, stop, time or trend break.
-8. **Logs and reports everything** in a trade journal and sends you a Telegram message for each action, plus a daily summary.
+8. **Logs and reports everything** in a trade journal and sends you a WhatsApp message for each action, plus a daily summary.
 9. **Includes circuit breakers:** daily, weekly and monthly loss limits, drawdown limits and a manual **kill switch**.
 
 ---
@@ -84,7 +84,7 @@ flowchart TD
     H --> I[Position Manager<br/>stop orders, partials, trailing,<br/>time stops, event exits]
     I --> G
     I --> J
-    J --> K[Telegram alerts + Daily report + Dashboard]
+    J --> K[WhatsApp alerts + Daily report]
     L[Reconciler + Health Monitor<br/>every 1-5 min] --> H
     L --> M[KILL SWITCH]
     M --> G
@@ -330,7 +330,7 @@ At 1% risk per trade: about +0.44% of the account per trade on average, before c
 | Position mismatch with broker | Reconciler runs every 1–5 min; any mismatch → halt new trades + alert |
 | Runaway loop / bug | Hard caps: max orders per day, max orders per minute, max position value |
 | Credentials leak | API keys in environment variables / secret store, never in code or git; static IP whitelisting |
-| Anything unexpected | **Kill switch** (Telegram command `/kill` + config flag): cancels pending orders and blocks all new orders immediately |
+| Anything unexpected | **Kill switch** (`python -m swingbot kill`, or the `state/KILL` file; turns on automatically after repeated errors): cancels pending orders and blocks all new orders immediately |
 
 ---
 
@@ -380,7 +380,7 @@ ENTRY ─► Initial stop placed at broker (−1R)
 ```
 SIGNAL → [APPROVAL*] → ORDER_SENT → FILLED / PARTIAL / REJECTED
 FILLED → STOP_PLACED → MANAGING → EXIT_SENT → CLOSED
-(*APPROVAL step is used in "semi-auto" mode: you approve via Telegram)
+(*APPROVAL step only in a semi-auto mode; you chose fully automatic, so it is skipped)
 ```
 
 - Partial fills: stop is placed for the filled quantity; unfilled remainder is cancelled at a cut-off time
@@ -437,7 +437,7 @@ FILLED → STOP_PLACED → MANAGING → EXIT_SENT → CLOSED
 
 ## 13. Monitoring, alerts and journal
 
-- **Telegram bot:** a message for every signal, order, fill, stop move, exit and error. Commands: `/status`, `/positions`, `/pnl`, `/pause`, `/resume`, `/kill`, `/approve <id>`
+- **WhatsApp alerts:** a message for every order, fill, stop move, exit and error, plus a morning summary. Control is from the command line: `status`, `kill`, `kill --flatten`, `resume`
 - **Daily report:** P&L, open positions with current R, portfolio heat, regime, tomorrow's watchlist, any rejected trades and why
 - **Trade journal (database):** for every trade it stores the entry reason, score breakdown, setup, stop/target, size, exit reason, R-multiple, chart snapshot, MAE/MFE (max adverse/favourable excursion)
 - **Weekly/monthly analytics:** win rate, avg R, expectancy, profit factor, performance by setup/sector/regime, drawdown chart
@@ -456,7 +456,7 @@ FILLED → STOP_PLACED → MANAGING → EXIT_SENT → CLOSED
 | Scheduler | APScheduler |
 | Broker SDKs | Kite Connect (Zerodha), Upstox API, SmartAPI (Angel One), DhanHQ, Alpaca, IBKR, chosen in Phase 0 |
 | Data sources | Broker historical API (primary), exchange EOD bhavcopy files, yfinance (research only) |
-| Alerts | Telegram Bot API |
+| Alerts | WhatsApp (CallMeBot or the Meta Cloud API) |
 | Config | YAML files + environment variables for secrets |
 | Deployment | Docker on a small cloud VPS with **static IP** (often required by brokers for API trading) |
 | Testing | pytest: unit tests for every risk rule; simulation tests for order flows |
@@ -475,7 +475,7 @@ swing_bot/
 │   ├── execution/             # broker adapters, order manager, reconciler
 │   ├── portfolio/             # positions, trailing stops, exit logic
 │   ├── backtest/              # engine, metrics, walk-forward, Monte Carlo
-│   ├── notify/                # Telegram alerts + commands
+│   ├── notify/                # WhatsApp alerts
 │   ├── journal/               # DB models, reports
 │   ├── scheduler.py           # daily schedule
 │   └── main.py                # entry point (modes: backtest / paper / live)
@@ -561,26 +561,30 @@ Each phase has a clear finish line. We move to the next phase only when the curr
 | **1. Data + analysis engine** | Data pipeline, indicators, regime engine, scoring, setup detector | Daily watchlist report with score breakdowns that you can check by hand |
 | **2. Risk engine** | Position sizing, all portfolio limits, circuit breakers, with full unit tests | 100% test coverage on risk rules |
 | **3. Backtester + validation** | Event-driven backtest, walk-forward, Monte Carlo, reports | Strategy meets the acceptance criteria in 12.2 |
-| **4. Broker integration + paper trading** | Broker adapter, order manager, reconciler, Telegram bot | 2–3 months of paper trading with zero operational errors |
-| **5. Live: small and semi-auto** | Live with 10–20% of intended capital; **you approve each trade** on Telegram | 1–2 months where live results match paper/backtest |
+| **4. Broker integration + paper trading** | Broker adapter, order manager, reconciler, WhatsApp alerts | 2–3 months of paper trading with zero operational errors |
+| **5. Live: small and semi-auto** | Live with 10–20% of intended capital; fully automatic with all safety latches (your choice) | 1–2 months where live results match paper/backtest |
 | **6. Full automation** | Auto-execution with all safeguards; scale capital gradually | Ongoing monitoring and monthly reviews |
 
 ---
 
 ## 16. Decisions needed from you
 
-Please answer these before development starts. The design adapts to each answer.
+**Answered.** Here is how the design adapted to each answer:
 
-1. **Market and broker:** Which country/exchange (e.g. NSE/BSE India, US) and which broker (Zerodha, Upstox, Angel One, Dhan, Alpaca, Interactive Brokers, other)? Does your broker plan include API access and historical data?
-2. **Capital:** How much capital will the bot manage (at first, and eventually)?
-3. **Risk tolerance:** Are you comfortable with 1% risk per trade and a 15% maximum drawdown halt? Or should it be more conservative (e.g. 0.5% / 10%)?
-4. **Automation level:** Fully automatic, or **semi-auto** (bot proposes, you tap approve)? Semi-auto is recommended for the first live phase.
-5. **Universe:** Large caps only (NIFTY 100 / S&P 500), or large + mid caps (NIFTY 500 / S&P 1500)?
-6. **Earnings:** Always exit before results (recommended), or allow holding through them?
-7. **Hosting:** Is a small cloud VPS with a static IP OK (about the cost of a mobile plan per month)?
-8. **Alerts:** Is Telegram OK for alerts and approvals, or do you prefer email/WhatsApp?
+| Question | Your answer | What the bot does |
+|---|---|---|
+| Market and broker | Groww and Zerodha | Both adapters are built. **Groww is recommended for execution** because its official API logs in with TOTP, so no human step is needed each day. Zerodha's Kite Connect needs one login tap every morning; the bot sends you the link on WhatsApp. |
+| Capital | ₹10,000 trial | A "micro" risk profile (below). `live_capital_limit: 10000` keeps the bot inside a ₹10k "sub-account" even if your broker account holds more money. It never touches shares you bought yourself. |
+| Risk tolerance | "Decide yourself" | Micro profile: **2% risk per trade (₹200)** in bull markets, 1% in neutral markets, 0 in bear markets. Max 2 positions, max ₹5,000 per position, max 4% total open risk, 15% drawdown halt. Partial profit-taking is off, because each extra sell costs a DP charge. The profile switches to 1.25% and then 1% risk automatically as equity grows past ₹50k and ₹5L. |
+| Automation | Fully automatic | No approval step. The safety latches move into code instead: broker-side OCO stops, circuit breakers, a kill switch, at-most-once orders, a stale-data guard, and auto-kill after repeated errors. |
+| Stocks | "Best trade setup" | NIFTY 500 universe, filtered by liquidity. Only setups that score at least 70 (bull) or 80 (neutral) **and** pass every risk rule are traded. |
+| Alerts | WhatsApp | CallMeBot (free, personal) or the Meta WhatsApp Cloud API. Every alert is also written to `state/alerts.log`. |
 
----
+**Design changes made during implementation:**
+- **Decisions are made after the close; orders are held by the broker.** Entries are stop-limit BUY orders valid for one day. Stops and targets are broker-side OCO orders: GTT two-leg on Kite, a smart OCO order on Groww. The bot therefore needs only end-of-day data. Positions stay protected even if the server goes down.
+- **Close-based exits run at the next open.** Trend breaks and time stops are decided on the completed daily candle and executed at the next morning's open. This matches the backtester exactly.
+- **SEBI static-IP rule (in force since 1 April 2026).** The bot must run on a server with a static IP that you register with your broker.
+- **Mean-reversion setup is off for the micro account.** Its small average win is eaten by charges.
 
 ## 17. Legal, regulatory and disclaimer
 
