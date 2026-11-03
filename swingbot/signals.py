@@ -393,7 +393,11 @@ class SignalDesk:
                                                "plans": [p.to_dict() for p in new_plans]}, indent=2))
         meta["last_bar"] = bar_day.date().isoformat()
 
-        lines = [
+        lines = []
+        if not self.s.get("signals.strategy_validated", False):
+            lines += ["⚠️ PAPER TRADING ONLY - this strategy has NOT passed its backtest yet.",
+                      "Do not place these orders with real money; just watch how they would do.", ""]
+        lines += [
             f"SWING SIGNALS - data to {bar_day:%a %d %b %Y}",
             f"Market: {regime.value.upper()}" + (f" | breadth {b_today:.0f}%" if b_today is not None else ""),
             f"Equity {_f(acct.equity)} (from peak -{acct.drawdown_pct:.1f}%) | risk profile {profile.name}",
