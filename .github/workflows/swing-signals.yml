@@ -33,10 +33,13 @@ jobs:
         run: pip install pandas numpy PyYAML requests yfinance
       - name: Analyse market and send WhatsApp signals
         env:
-          WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}
-          CALLMEBOT_API_KEY: ${{ secrets.CALLMEBOT_API_KEY }}
+          # repository secrets preferred; repository variables accepted as a fallback
+          WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE || vars.WHATSAPP_PHONE }}
+          CALLMEBOT_API_KEY: ${{ secrets.CALLMEBOT_API_KEY || vars.CALLMEBOT_API_KEY }}
+          PYTHONWARNINGS: ignore      # hide library deprecation noise in the log
         run: python -m swingbot signals
       - name: Save journal
+        if: always()                # keep your positions even if WhatsApp failed
         run: |
           git config user.name "swingbot"
           git config user.email "swingbot@users.noreply.github.com"

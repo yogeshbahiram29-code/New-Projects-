@@ -66,6 +66,7 @@ class SignalDesk:
         self.exits_cfg = settings.section("exits")
         self.exec = settings.section("execution")
         self.capital = float(settings.get("initial_capital", 10000))
+        self.sent_ok: bool | None = None  # result of the last WhatsApp send
 
     # ------------------------------------------------------------------ files
     @property
@@ -404,7 +405,7 @@ class SignalDesk:
         lines += ["", "Rules: always set the GTT stop right after you buy. Never move a stop down."]
         msg = "\n".join(lines)
         if send and self.n:
-            self.n.send(msg)
+            self.sent_ok = self.n.send(msg)
         return msg
 
     # ------------------------------------------------------------- formatting

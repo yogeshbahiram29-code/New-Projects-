@@ -296,11 +296,16 @@ def cmd_signals(args, settings) -> int:
     from .data import DataError
     from .signals import SignalError
 
+    desk = _desk(settings, need_data=True)
     try:
-        print(_desk(settings, need_data=True).run(send=not args.no_whatsapp))
+        print(desk.run(send=not args.no_whatsapp))
     except (DataError, SignalError) as e:
         print(f"ERROR: {e}")
         return 1
+    if desk.sent_ok is False:
+        print("ERROR: the WhatsApp message was NOT delivered. Check WHATSAPP_PHONE and CALLMEBOT_API_KEY "
+              "(GitHub: Settings -> Secrets and variables -> Actions -> Repository secrets).")
+        return 3  # makes the GitHub run go red so a silent failure can't go unnoticed
     return 0
 
 
