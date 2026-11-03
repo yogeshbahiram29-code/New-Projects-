@@ -37,9 +37,10 @@ def test_daily_run_is_idempotent_and_writes_plans(desk):
     day = idx.index[-100].date()
     msg = d.run(today=day, send=False)
     assert "SWING SIGNALS" in msg and "NEW TRADES" in msg
+    assert msg.startswith("⚠️ PAPER TRADING ONLY")  # strategy not validated yet -> warning first
     assert d.plans_path.exists() and d.account_path.exists()
     again = d.run(today=day, send=False)
-    assert again.startswith("(repeat) SWING SIGNALS")  # re-run re-sends the same report, changes nothing
+    assert again == f"(repeat) {msg}"  # re-run re-sends the same report, changes nothing
 
 
 def test_took_uses_plan_levels_and_rejects_bad_input(desk):
