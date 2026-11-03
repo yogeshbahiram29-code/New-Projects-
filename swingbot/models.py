@@ -54,6 +54,7 @@ class TradePlan:
     sector: str = "UNKNOWN"
     notes: str = ""
     quantity: int = 0  # filled in by the risk engine
+    trailing_only: bool = False  # no profit target: exit by trailing stop / time (target_price is a far placeholder)
 
     @property
     def risk_per_share(self) -> float:
@@ -119,6 +120,8 @@ class Position:
     realized_pnl: float = 0.0  # from partial exits, after charges
     equity_at_entry: float = 0.0
     pending_exit_reason: str | None = None  # close-based exit queued for next session
+    trailing_only: bool = False  # exit by trailing stop / time, no profit target
+    highest_close: float = 0.0  # for close-based trailing stops
 
     def __post_init__(self) -> None:
         if self.initial_quantity <= 0:

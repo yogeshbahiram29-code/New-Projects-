@@ -237,10 +237,16 @@ class RiskEngine:
         gross_reward = qty * plan.reward_per_share
         gross_risk = qty * rps
         net_rr = (gross_reward - cost_win) / (gross_risk + cost_loss)
-        if net_rr < float(r.get("min_reward_risk", 2.0)):
-            return reject(f"reward:risk after charges {net_rr:.2f} < {r.get('min_reward_risk', 2.0)}")
-        if cost_win > float(r.get("max_cost_share_of_reward", 0.10)) * gross_reward:
-            return reject(f"charges ₹{cost_win:.0f} eat >{float(r.get('max_cost_share_of_reward', 0.1)) * 100:.0f}% of the expected reward")
+        if plan.trailing_only:
+            # no profit target: judge charges against the money at risk instead
+            share = cost_loss / gross_risk if gross_risk > 0 else 1.0
+            if share > float(r.get("max_cost_share_of_risk", 0.25)):
+                return reject(f"charges ₹{cost_loss:.0f} are {share * 100:.0f}% of the ₹{gross_risk:.0f} at risk (too small a trade)")
+        else:
+            if net_rr < float(r.get("min_reward_risk", 2.0)):
+                return reject(f"reward:risk after charges {net_rr:.2f} < {r.get('min_reward_risk', 2.0)}")
+            if cost_win > float(r.get("max_cost_share_of_reward", 0.10)) * gross_reward:
+                return reject(f"charges ₹{cost_win:.0f} eat >{float(r.get('max_cost_share_of_reward', 0.1)) * 100:.0f}% of the expected reward")
 
         # 5. portfolio-level limits -------------------------------------------------
         new_risk = gross_risk + cost_loss
@@ -259,9 +265,9 @@ class RiskEngine:
             if worst > float(r.get("max_correlation", 0.8)):
                 return reject(f"too correlated with {worst_sym} ({worst:.2f})")
 
+        rr_txt = "trailing stop, no fixed target" if plan.trailing_only else f"R:R after charges {net_rr:.2f}"
         reasons.append(
-            f"risk ₹{gross_risk:,.0f} ({gross_risk / state.equity * 100:.2f}% of equity), "
-            f"R:R after charges {net_rr:.2f}, est. charges ₹{cost_win:.0f}"
+            f"risk ₹{gross_risk:,.0f} ({gross_risk / state.equity * 100:.2f}% of equity), {rr_txt}, est. charges ₹{cost_win:.0f}"
         )
         return RiskDecision(
             True,

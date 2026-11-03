@@ -24,15 +24,28 @@ def test_plan_worked_example_standard_account(settings, costs, make_plan):
 
 
 def test_micro_account_10k(settings, costs, make_plan):
-    """₹10k: 2% risk = ₹200, max position 50% = ₹5,000."""
+    """₹10k: 1% risk = ₹100 (your choice), max position 50% = ₹5,000."""
     eng = RiskEngine(settings, costs)
     acct = AccountState(equity=10_000, cash=10_000)
     plan = make_plan(trigger=200, stop=192, target=230)  # ₹8 risk/share
     d = eng.evaluate(plan, acct, [], Regime.BULL, avg_daily_volume=1_000_000)
     assert d.approved, d.reasons
-    assert d.quantity == 24  # min(200/8=25, 5000/201=24)
+    assert d.quantity == 12  # 100 / 8 = 12.5 -> 12 shares
     assert d.position_value <= 5_000
-    assert d.risk_amount <= 200
+    assert d.risk_amount <= 100
+
+
+def test_trailing_only_plan_checks_charges_against_risk(settings, costs, make_plan):
+    eng = RiskEngine(settings, costs)
+    acct = AccountState(equity=10_000, cash=10_000)
+    plan = make_plan(trigger=200, stop=192, target=280)
+    plan.trailing_only = True
+    d = eng.evaluate(plan, acct, [], Regime.BULL, avg_daily_volume=1_000_000)
+    assert d.approved and "trailing stop" in d.reasons[-1]
+    tiny = make_plan(trigger=200, stop=198, target=280)  # ₹2 risk/share -> qty capped by position size
+    tiny.trailing_only = True
+    d2 = eng.evaluate(tiny, acct, [], Regime.BULL, avg_daily_volume=1_000_000)
+    assert not d2.approved  # 1% stop is inside normal noise / charges too large vs risk
 
 
 def test_price_too_high_for_small_account(settings, costs, make_plan):

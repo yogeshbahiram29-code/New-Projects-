@@ -90,9 +90,9 @@ def cmd_backtest(args, settings) -> int:
         stocks, index_df, sectors = make_market(n_stocks=args.n_stocks, years=args.years, seed=args.seed)
         start = args.start or str(index_df.index[300].date())
     else:
-        from .data import CachedData, load_universe, make_provider
+        from .data import CachedData, load_full_universe, make_provider
 
-        uni = load_universe(settings.get("universe.file"))
+        uni = load_full_universe(settings)
         bench = settings.get("regime.benchmark", "NIFTY50")
         days = int((pd.Timestamp(args.end or date.today()) - pd.Timestamp(args.start or "2014-01-01")).days * 0.7) + 400
         cache = CachedData(make_provider(settings), settings.get("data.cache_dir", "data_cache"))
@@ -103,7 +103,7 @@ def cmd_backtest(args, settings) -> int:
         print(f"Loaded {len(stocks)} stocks, {index_df.index[0].date()} -> {index_df.index[-1].date()}")
     costs = args.costs or settings.get("signals.broker_costs", "zerodha")
     print(f"Backtesting from {start} with capital ₹{settings.get('initial_capital'):,.0f} and {costs} charges ...")
-    res = Backtester(settings, costs).run(stocks, index_df, start, args.end, sectors, progress=True)
+    res = Backtester(settings, costs, research=args.research).run(stocks, index_df, start, args.end, sectors, progress=True)
     summary, bench_m = metrics.summarize(res, index_df)
     print(metrics.format_report(res, summary, bench_m, synthetic=args.synthetic))
     out = Path(settings.get("paths.reports_dir", "reports"))
@@ -114,36 +114,79 @@ def cmd_backtest(args, settings) -> int:
     return 0
 
 
+RESEARCH_VARIANTS = [
+    ("classic (old v1)", {"strategy": "classic"}, [1_000_000]),
+    ("momentum breakout", {"strategy": "momentum", "momentum": {"entry": "breakout"}}, [1_000_000, 10_000]),
+    ("momentum pullback", {"strategy": "momentum", "momentum": {"entry": "pullback"}}, [1_000_000, 10_000]),
+]
+
+
+def cmd_research(args, settings) -> int:
+    """Compare strategy variants on the SAME data, in research mode (halts recorded, testing continues)."""
+    from . import metrics
+    from .backtest import Backtester
+    from .config import load_settings
+    from .data import CachedData, load_full_universe, make_provider
+
+    end = pd.Timestamp(args.end).date()
+    uni = load_full_universe(settings)
+    bench = settings.get("regime.benchmark", "NIFTY50")
+    days = (pd.Timestamp(end) - pd.Timestamp(args.start)).days + 1300  # + warm-up for 200-day averages
+    cache = CachedData(make_provider(settings), settings.get("data.cache_dir", "data_cache"))
+    raw = cache.load(sorted(uni) + [bench], int(days / 1.5) + 1, end)  # data physically ends at --end
+    index_df = raw.pop(bench)
+    print(f"Universe: {len(uni)} symbols requested, {len(raw)} with data | data {index_df.index[0].date()} -> "
+          f"{index_df.index[-1].date()} | test window {args.start} -> {end}")
+    rows, bench_row = [], None
+    for name, override, capitals in RESEARCH_VARIANTS:
+        for cap in capitals:
+            s = load_settings(args.settings, {**override, "mode": "backtest", "initial_capital": cap})
+            res = Backtester(s, args.costs, research=True).run(raw, index_df, args.start, str(end), uni)
+            summ, bench_m = metrics.summarize(res, index_df)
+            print(f"\n{'#' * 72}\n# {name} | capital ₹{cap:,}\n{'#' * 72}")
+            print(metrics.format_report(res, summ, bench_m))
+            rows.append({"variant": name, "capital": cap, **{k: summ.get(k) for k in (
+                "trades", "win_rate_pct", "expectancy_r", "profit_factor", "cagr_pct", "max_drawdown_pct",
+                "avg_bars_held", "time_in_market_pct", "would_have_halted")}})
+            bench_row = bench_m
+    print("\n" + "=" * 72 + "\nSUMMARY (in-sample, after costs, research mode)\n" + "=" * 72)
+    print(pd.DataFrame(rows).to_string(index=False))
+    if bench_row:
+        print(f"\nNIFTY 50 buy & hold same window: CAGR {bench_row.get('cagr_pct')}%, max drawdown {bench_row.get('max_drawdown_pct')}%")
+    return 0
+
+
 def cmd_scan(args, settings) -> int:
-    from . import analysis, regime as regime_mod
     from .costs import CostModel
-    from .data import CachedData, events_calendar, load_universe, make_provider
+    from .data import CachedData, events_calendar, load_full_universe, make_provider
     from .models import Regime
     from .risk import AccountState, RiskEngine
-    from .scanner import scan
+    from .strategies import get_strategy
 
-    uni = load_universe(settings.get("universe.file"))
+    uni = load_full_universe(settings)
     bench = settings.get("regime.benchmark", "NIFTY50")
     cache = CachedData(make_provider(settings), settings.get("data.cache_dir", "data_cache"))
     raw = cache.load(sorted(uni) + [bench], int(settings.get("data.history_days", 600)))
     index_df = raw.pop(bench)
-    frames, rs_panel = analysis.prepare_universe(raw, index_df)
-    breadth = regime_mod.breadth_series(frames)
-    b = float(breadth.iloc[-1]) if len(breadth) and not pd.isna(breadth.iloc[-1]) else None
-    reg = regime_mod.current_regime(index_df, b, settings.section("regime"))
+    strat = get_strategy(settings)
+    prep = strat.prepare(raw, index_df)
+    reg = strat.current_regime(index_df, prep)
     events, ok = events_calendar(settings)
     when = index_df.index[-1]
-    print(f"Data up to {when.date()} | regime {reg.value.upper()} | breadth {f"{b:.0f}%" if b is not None else "n/a"} | earnings calendar {'OK' if ok else 'UNAVAILABLE'}")
-    cands = scan(frames, when, settings, rs_panel, uni, events)
+    print(f"Strategy {strat.name} | data up to {when.date()} | regime {reg.value.upper()} | "
+          f"earnings calendar {'OK' if ok else 'UNAVAILABLE'}")
+    cands = strat.scan(prep, when, uni, events)
     cap = float(settings.get("initial_capital", 10000))
-    risk = RiskEngine(settings, CostModel.from_settings(settings.section("costs"), settings.get("broker", "paper")))
+    risk = RiskEngine(settings, CostModel.from_settings(settings.section("costs"), settings.get("signals.broker_costs", "zerodha")))
     acct = AccountState(equity=cap, cash=cap)
-    eval_regime = reg if reg.allows_entries else Regime.NEUTRAL
+    eval_regime = reg if reg.allows_entries else Regime.BULL  # show what WOULD be traded
     for c in cands[: args.top]:
-        d = risk.evaluate(c.plan, acct, [], eval_regime, float(frames[c.plan.symbol]["vol_avg50"].iloc[-1]))
+        d = risk.evaluate(c.plan, acct, [], eval_regime, float(prep.frames[c.plan.symbol]["vol_avg50"].iloc[-1]))
         p = c.plan
-        print(f"\n{analysis.explain(c.card)}\n  {p.setup.value}: {p.notes}\n  buy above ₹{p.trigger_price} (max ₹{p.limit_price}), "
-              f"stop ₹{p.stop_price} ({p.stop_distance_pct:.1f}%), target ₹{p.target_price} (R:R {p.reward_risk:.2f})\n"
+        target = "none (trailing stop)" if p.trailing_only else f"₹{p.target_price} (R:R {p.reward_risk:.2f})"
+        print(f"\n{p.symbol}: score {c.card.total:g} - {p.setup.value}: {p.notes}\n"
+              f"  buy above ₹{p.trigger_price} (max ₹{p.limit_price}), stop ₹{p.stop_price} ({p.stop_distance_pct:.1f}%), "
+              f"target {target}\n"
               f"  risk engine: {'APPROVED ' + str(d.quantity) + ' shares' if d.approved else 'REJECTED'} - {d.reasons[-1]}")
     if not cands:
         print("No setups today. That's normal - the bot only trades when everything lines up.")
@@ -364,6 +407,9 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--years", type=float, default=10)
     b.add_argument("--seed", type=int, default=7)
     b.add_argument("--costs", choices=["zerodha", "groww", "paper"], help="charges model (default: zerodha)")
+    b.add_argument("--research", action="store_true", help="record drawdown halts but keep testing the whole period")
+    b.add_argument("--strategy", choices=["momentum", "classic"])
+    b.add_argument("--entry", choices=["breakout", "pullback"], help="momentum strategy entry type")
     s = sub.add_parser("scan")
     s.add_argument("--top", type=int, default=10)
     sub.add_parser("run")
@@ -380,6 +426,10 @@ def main(argv: list[str] | None = None) -> int:
     kl.add_argument("request_token")
     sub.add_parser("update-universe")
     sub.add_parser("test-whatsapp")
+    rs = sub.add_parser("research", help="compare strategy variants on the same data (in-sample)")
+    rs.add_argument("--start", default="2015-01-01")
+    rs.add_argument("--end", default="2022-12-31", help="data is cut here - keep later years for the final test")
+    rs.add_argument("--costs", default="zerodha", choices=["zerodha", "groww", "paper"])
     sg = sub.add_parser("signals", help="free mode: daily WhatsApp trade instructions")
     sg.add_argument("--no-whatsapp", action="store_true", help="only print")
     tk = sub.add_parser("took", help="free mode: record a buy")
@@ -401,6 +451,10 @@ def main(argv: list[str] | None = None) -> int:
         overrides["initial_capital"] = args.capital
     if args.cmd == "backtest":
         overrides["mode"] = "backtest"
+        if args.strategy:
+            overrides["strategy"] = args.strategy
+        if args.entry:
+            overrides["momentum"] = {"entry": args.entry}
     settings = load_settings(args.settings, overrides or None)
     os.chdir(ROOT)
     _setup_logging(settings.get("paths.state_dir", "state"))
@@ -408,7 +462,7 @@ def main(argv: list[str] | None = None) -> int:
         "backtest": cmd_backtest, "scan": cmd_scan, "run": cmd_run, "job": cmd_job, "status": cmd_status,
         "kill": cmd_kill, "resume": cmd_resume, "preflight": cmd_preflight, "kite-login-url": cmd_kite_login,
         "kite-login": cmd_kite_login, "update-universe": cmd_update_universe, "test-whatsapp": cmd_test_whatsapp,
-        "signals": cmd_signals, "took": cmd_took, "sold": cmd_sold, "journal": cmd_journal,
+        "research": cmd_research, "signals": cmd_signals, "took": cmd_took, "sold": cmd_sold, "journal": cmd_journal,
     }
     return handlers[args.cmd](args, settings)
 

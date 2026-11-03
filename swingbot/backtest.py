@@ -20,13 +20,13 @@ from datetime import date
 
 import pandas as pd
 
-from . import analysis, regime as regime_mod
 from .config import Settings
 from .costs import CostModel
-from .exits import manage_position, partial_price, partial_quantity
+from .exits import partial_price, partial_quantity
 from .models import ClosedTrade, Position, Regime
 from .risk import AccountState, RiskEngine, check_circuit_breakers
-from .scanner import Candidate, correlations_with, returns_panel, scan
+from .scanner import Candidate, correlations_with, returns_panel
+from .strategies import get_strategy
 
 
 @dataclass
@@ -37,14 +37,21 @@ class BacktestResult:
     rejected: dict[str, int] = field(default_factory=dict)
     signals: int = 0
     initial_capital: float = 0.0
+    halts: list = field(default_factory=list)  # (date, drawdown %) where live trading would have halted
+    exposure_pct: float = 0.0  # % of days with at least one open position
+    strategy: str = ""
 
     def trades_frame(self) -> pd.DataFrame:
         return pd.DataFrame([t.to_dict() for t in self.trades])
 
 
 class Backtester:
-    def __init__(self, settings: Settings, broker_costs: str = "paper"):
+    def __init__(self, settings: Settings, broker_costs: str = "paper", research: bool = False):
+        """research=True: a drawdown halt is recorded but trading continues, so the
+        whole period is evaluated (live trading always stops for real)."""
         self.s = settings
+        self.research = research
+        self.strategy = get_strategy(settings)
         self.costs = CostModel.from_settings(settings.section("costs"), broker_costs)
         self.risk = RiskEngine(settings, self.costs)
         self.exec = settings.section("execution")
@@ -62,10 +69,12 @@ class Backtester:
         events: dict[str, list[date]] | None = None,
         progress: bool = False,
     ) -> BacktestResult:
-        frames, rs_panel = analysis.prepare_universe(raw, index_df)
-        breadth = regime_mod.breadth_series(frames)
-        regimes = regime_mod.regime_series(index_df, breadth, self.s.section("regime"))
+        prep = self.strategy.prepare(raw, index_df)
+        frames = prep.frames
+        regimes = self.strategy.regime_series(index_df, prep)
         rets = returns_panel(frames)
+        halts: list = []
+        exposure_days = 0
 
         days = index_df.index
         if start is not None:
@@ -109,11 +118,11 @@ class Backtester:
                     self._close(pos, pos.stop_price * (1 - self.slip), t, stop_label, positions, trades, state, r_cfg)
                     continue
                 profile = self.s.profile_for(state.equity)
-                if profile.partial_exit_enabled and not pos.partial_taken and pos.quantity >= 2:
+                if self.strategy.allows_partials and profile.partial_exit_enabled and not pos.partial_taken and pos.quantity >= 2:
                     lvl = partial_price(pos, self.exits_cfg)
                     if h >= lvl:
                         self._partial(pos, max(o, lvl), partial_quantity(pos, self.exits_cfg), state)
-                if h >= pos.target_price:
+                if not pos.trailing_only and h >= pos.target_price:
                     self._close(pos, max(o, pos.target_price), t, "target reached", positions, trades, state, r_cfg)
 
             # 3) new entries from yesterday's plans ------------------------------
@@ -127,6 +136,10 @@ class Backtester:
                     eq_open += pos.quantity * float(df.loc[:t, col].iloc[-1])
                 state.mark(eq_open)
                 breaker = check_circuit_breakers(state, breaker_cfg)
+                if self.research and state.halted:
+                    halts.append((t.date(), round(state.drawdown_pct, 1)))
+                    state.halted, state.halt_reason, state.peak_equity = False, "", state.equity
+                    breaker = check_circuit_breakers(state, breaker_cfg)
                 for cand in pending:
                     plan = cand.plan
                     df = frames[plan.symbol]
@@ -166,6 +179,8 @@ class Backtester:
                         sector=plan.sector,
                         entry_costs=cost,
                         equity_at_entry=state.equity,
+                        trailing_only=plan.trailing_only,
+                        highest_close=fill,
                     )
                     positions.append(pos)
                     if lo <= pos.stop_price:  # conservative: assume stop hit after entry
@@ -180,6 +195,7 @@ class Backtester:
                 mtm += pos.quantity * px
             state.mark(mtm)
             equity_curve[t] = mtm
+            exposure_days += 1 if positions else 0
 
             reg = regimes.get(t, Regime.NEUTRAL)
             profile = self.s.profile_for(state.equity)
@@ -188,14 +204,15 @@ class Backtester:
                 if t not in df.index:
                     continue
                 per_share_cost = (pos.entry_costs + self.costs.sell_cost(pos.quantity * pos.entry_price)) / max(pos.quantity, 1)
-                res = manage_position(pos, df.loc[t], reg, self.exits_cfg, profile.partial_exit_enabled, None, per_share_cost)
+                res = self.strategy.manage(pos, df.loc[t], reg, profile.partial_exit_enabled and self.strategy.allows_partials,
+                                           None, per_share_cost)
                 if res.new_stop is not None:
                     pos.stop_price = res.new_stop
                 if res.exit_reason:
                     pos.pending_exit_reason = res.exit_reason
 
             if reg.allows_entries and n + 1 < len(days):
-                pending = scan(frames, t, self.s, rs_panel, sectors, events)
+                pending = self.strategy.scan(prep, t, sectors, events)
                 signals += len(pending)
             if progress and n % 250 == 0:
                 print(f"  {t.date()}  equity ₹{mtm:,.0f}  open {len(positions)}  trades {len(trades)}")
@@ -215,6 +232,9 @@ class Backtester:
             rejected=dict(sorted(rejected.items(), key=lambda kv: -kv[1])),
             signals=signals,
             initial_capital=capital,
+            halts=halts,
+            exposure_pct=round(exposure_days / max(len(days), 1) * 100, 1),
+            strategy=self.strategy.name,
         )
 
     # ------------------------------------------------------------------

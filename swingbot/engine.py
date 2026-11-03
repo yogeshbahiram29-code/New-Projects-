@@ -30,17 +30,17 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from . import analysis, regime as regime_mod
 from .brokers.base import CANCELLED, FILLED, REJECTED, Broker, BrokerError, NotSupported
 from .config import Settings
 from .costs import CostModel
-from .data import events_calendar, load_universe
-from .exits import manage_position, partial_price, partial_quantity
+from .data import events_calendar, load_full_universe
+from .exits import partial_price, partial_quantity
 from .models import ClosedTrade, Position, Regime, TradePlan
 from .notify import Notifier
 from .risk import AccountState, RiskEngine, check_circuit_breakers
-from .scanner import correlations_with, returns_panel, scan
+from .scanner import correlations_with, returns_panel
 from .store import Store
+from .strategies import get_strategy
 
 log = logging.getLogger("swingbot.engine")
 
@@ -383,6 +383,7 @@ class LiveEngine:
             symbol=plan.symbol, setup=plan.setup.value, entry_date=self.today(), entry_price=avg, quantity=qty,
             initial_stop=plan.stop_price, stop_price=plan.stop_price, target_price=plan.target_price,
             sector=plan.sector, entry_costs=cost, equity_at_entry=acct.equity,
+            trailing_only=plan.trailing_only, highest_close=avg,
         )
         self.db.put("bot_cash", self.bot_cash() - qty * avg - cost)
         self.db.save_position(pos)
@@ -485,7 +486,7 @@ class LiveEngine:
 
     def _maybe_partials(self, quotes: dict[str, float]) -> None:
         profile = self.s.profile_for(self.account().equity)
-        if not profile.partial_exit_enabled or not quotes:
+        if not profile.partial_exit_enabled or not quotes or not get_strategy(self.s).allows_partials:
             return
         for pos in self.db.positions():
             ltp = quotes.get(pos.symbol)
@@ -527,7 +528,7 @@ class LiveEngine:
     def job_eod(self) -> None:
         self._start_day()
         today = self.today()
-        uni = load_universe(self.s.get("universe.file", "config/universe.csv"))
+        uni = load_full_universe(self.s)
         symbols = sorted(set(uni) | {p.symbol for p in self.db.positions()})
         bench = self.s.get("regime.benchmark", "NIFTY50")
         raw = self.data.load(symbols + [bench], int(self.s.get("data.history_days", 600)), today)
@@ -551,10 +552,10 @@ class LiveEngine:
         lp.update({s: float(df["close"].iloc[-1]) for s, df in fresh.items()})
         self.db.put("last_prices", lp)
 
-        frames, rs_panel = analysis.prepare_universe(fresh, index_df)
-        breadth = regime_mod.breadth_series(frames)
-        b_today = float(breadth.iloc[-1]) if len(breadth) and not pd.isna(breadth.iloc[-1]) else None
-        regime = regime_mod.current_regime(index_df, b_today, self.s.section("regime"))
+        strat = get_strategy(self.s)
+        prep = strat.prepare(fresh, index_df)
+        frames = prep.frames
+        regime = strat.current_regime(index_df, prep)
         self.db.put("regime", regime.value)
         events, events_ok = events_calendar(self.s)
         self.db.put("events_ok", events_ok)
@@ -573,7 +574,7 @@ class LiveEngine:
                     n_days = len(pd.bdate_range(today, d)) - 1
                     ev = n_days if ev is None else min(ev, n_days)
             per_share = (pos.entry_costs + self.costs.sell_cost(pos.quantity * pos.entry_price)) / max(pos.quantity, 1)
-            res = manage_position(pos, row, regime, self.exits_cfg, profile.partial_exit_enabled, ev, per_share)
+            res = strat.manage(pos, row, regime, profile.partial_exit_enabled and strat.allows_partials, ev, per_share)
             if res.new_stop is not None:
                 try:
                     if pos.protection_id and self.ensure_connected():
@@ -600,7 +601,7 @@ class LiveEngine:
         when = index_df.index[-1]
         if regime.allows_entries and breaker.allow_entries and not self.kill_active():
             sectors = {s: uni.get(s, "UNKNOWN") for s in frames}
-            cands = scan(frames, when, self.s, rs_panel, sectors, events)
+            cands = strat.scan(prep, when, sectors, events)
             rets = returns_panel(frames)
             held = [p.symbol for p in self.db.positions()]
             corr_map, adv_map = {}, {}

@@ -67,6 +67,9 @@ def trade_metrics(trades: list[ClosedTrade]) -> dict[str, float]:
         "avg_win_r": round(float(r[pnl > 0].mean()), 2) if len(wins) else 0.0,
         "avg_loss_r": round(float(r[pnl <= 0].mean()), 2) if len(losses) else 0.0,
         "expectancy_r": round(float(r.mean()), 3),
+        "expectancy_rs": round(float(pnl.mean()), 2),
+        "avg_win_rs": round(float(wins.mean()), 2) if len(wins) else 0.0,
+        "avg_loss_rs": round(float(losses.mean()), 2) if len(losses) else 0.0,
         "profit_factor": round(float(gross_win / gross_loss), 2) if gross_loss > 0 else float("inf"),
         "total_charges": round(float(sum(t.costs for t in real)), 2),
         "avg_bars_held": round(float(np.mean([t.bars_held for t in real])), 1),
@@ -143,9 +146,10 @@ def acceptance(summary: dict[str, float], benchmark: dict[str, float] | None = N
 def summarize(result, index_df: pd.DataFrame | None = None) -> tuple[dict[str, float], dict[str, float] | None]:
     summary = {**equity_metrics(result.equity, result.initial_capital), **trade_metrics(result.trades), **monte_carlo_drawdown(result.trades)}
     if not result.equity.empty:
-        exposure_days = sum(1 for _ in result.equity.index)
         summary["signals"] = result.signals
-        summary["days"] = exposure_days
+        summary["days"] = len(result.equity)
+        summary["time_in_market_pct"] = getattr(result, "exposure_pct", 0.0)
+        summary["would_have_halted"] = len(getattr(result, "halts", []) or [])
     bench = None
     if index_df is not None and not result.equity.empty:
         idx = index_df["close"].loc[result.equity.index[0] : result.equity.index[-1]]
@@ -163,12 +167,20 @@ def format_report(result, summary: dict, bench: dict | None, synthetic: bool = F
             " The numbers below say NOTHING about real-market performance.",
             "=" * 72,
         ]
+    if getattr(result, "strategy", ""):
+        lines.append(f"Strategy: {result.strategy}")
+    n_trades = summary.get("trades", 0)
+    if n_trades < 100:
+        lines.append(f"!! Only {n_trades} trades - too few to trust these numbers (need 100+).")
+    wr = summary.get("win_rate_pct", 0)
+    if wr > 75:
+        lines.append(f"!! Win rate {wr}% is suspiciously high - check for bias/overfitting before believing it.")
     lines.append("\nPERFORMANCE")
     keys = [
         "start_equity", "final_equity", "total_return_pct", "cagr_pct", "max_drawdown_pct", "sharpe", "sortino", "mar",
-        "trades", "win_rate_pct", "avg_win_r", "avg_loss_r", "expectancy_r", "profit_factor", "total_charges",
-        "avg_bars_held", "max_losing_streak", "best_trade_r", "worst_trade_r", "mc_dd_median_pct", "mc_dd_95_pct", "mc_dd_99_pct",
-        "signals", "years",
+        "trades", "win_rate_pct", "avg_win_r", "avg_loss_r", "avg_win_rs", "avg_loss_rs", "expectancy_r", "expectancy_rs",
+        "profit_factor", "total_charges", "avg_bars_held", "max_losing_streak", "best_trade_r", "worst_trade_r",
+        "time_in_market_pct", "would_have_halted", "mc_dd_median_pct", "mc_dd_95_pct", "mc_dd_99_pct", "signals", "years",
     ]
     for k in keys:
         if k in summary:
@@ -183,6 +195,11 @@ def format_report(result, summary: dict, bench: dict | None, synthetic: bool = F
     yr = yearly(result.equity)
     if not yr.empty:
         lines.append("\nBY YEAR\n" + yr.to_string())
+    halts = getattr(result, "halts", []) or []
+    if halts:
+        lines.append("\nWOULD HAVE HALTED (15% drawdown) - research mode kept going to test the whole period")
+        for d, dd in halts[:10]:
+            lines.append(f"  {d}  drawdown {dd}%")
     if result.rejected:
         lines.append("\nTOP RISK-ENGINE REJECTIONS")
         for k, v in list(result.rejected.items())[:10]:

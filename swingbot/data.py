@@ -224,6 +224,16 @@ def load_universe(path: str | Path) -> dict[str, str]:
     return out
 
 
+def load_full_universe(settings) -> dict[str, str]:
+    """Main universe file plus the 'fallen stocks' extra file (reduces survivorship bias)."""
+    uni = load_universe(settings.get("universe.file", "config/universe.csv"))
+    extra = settings.get("universe.extra_file")
+    if extra and Path(extra).exists():
+        for sym, sec in load_universe(extra).items():
+            uni.setdefault(sym, sec)
+    return uni
+
+
 def download_nifty500(dest: str | Path) -> int:
     """Refresh the universe from NSE's official NIFTY 500 constituents file."""
     r = requests.get(NIFTY500_URL, headers=UA, timeout=30)

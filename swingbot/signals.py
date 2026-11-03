@@ -26,15 +26,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import analysis, regime as regime_mod
 from .config import Settings
 from .costs import CostModel
-from .data import events_calendar, load_universe
-from .exits import manage_position
+from .data import events_calendar, load_full_universe
 from .models import ClosedTrade, Position, Regime, TradePlan
 from .notify import Notifier
 from .risk import AccountState, RiskEngine, check_circuit_breakers
-from .scanner import correlations_with, returns_panel, scan
+from .scanner import correlations_with, returns_panel
+from .strategies import get_strategy
 
 log = logging.getLogger("swingbot.signals")
 
@@ -100,7 +99,7 @@ class SignalDesk:
                     continue
                 if f.name in ("quantity", "bars_held", "initial_quantity"):
                     d[f.name] = int(float(v))
-                elif f.name in ("partial_taken", "reached_1r"):
+                elif f.name in ("partial_taken", "reached_1r", "trailing_only"):
                     d[f.name] = str(v).strip().lower() in ("true", "1", "yes")
                 elif f.name in ("symbol", "setup", "sector", "protection_id", "pending_exit_reason", "entry_date"):
                     d[f.name] = str(v)
@@ -191,6 +190,7 @@ class SignalDesk:
             entry_price=float(price), quantity=int(qty), initial_stop=float(stop), stop_price=float(stop),
             target_price=float(target), sector=plan.sector if plan else "UNKNOWN",
             entry_costs=round(self.costs.buy_cost(qty * price), 2), equity_at_entry=eq,
+            trailing_only=bool(plan.trailing_only) if plan else False, highest_close=float(price),
         )
         last_bar[symbol] = pos.entry_date.isoformat()  # management starts with the next candle
         self.save_positions(positions + [pos], last_bar)
@@ -244,7 +244,7 @@ class SignalDesk:
         today = today or date.today()
         if self.loader is None:
             raise SignalError("no market data loader configured")
-        uni = load_universe(self.s.get("universe.file", "config/universe.csv"))
+        uni = load_full_universe(self.s)
         positions, last_bar = self.positions()
         bench = self.s.get("regime.benchmark", "NIFTY50")
         symbols = sorted(set(uni) | {p.symbol for p in positions})
@@ -268,10 +268,13 @@ class SignalDesk:
             return msg
         stale = (pd.Timestamp(today) - bar_day).days > 4
         fresh = {s: df for s, df in raw.items() if not df.empty and df.index[-1] >= bar_day}
-        frames, rs_panel = analysis.prepare_universe(fresh, index_df)
-        breadth = regime_mod.breadth_series(frames)
-        b_today = float(breadth.iloc[-1]) if len(breadth) and not pd.isna(breadth.iloc[-1]) else None
-        regime = regime_mod.current_regime(index_df, b_today, self.s.section("regime"))
+        strat = get_strategy(self.s)
+        prep = strat.prepare(fresh, index_df)
+        frames = prep.frames
+        b_today = None
+        if prep.breadth is not None and len(prep.breadth) and not pd.isna(prep.breadth.iloc[-1]):
+            b_today = float(prep.breadth.iloc[-1])
+        regime = strat.current_regime(index_df, prep)
         events, events_ok = events_calendar(self.s)
 
         acct = self.account()
@@ -311,7 +314,7 @@ class SignalDesk:
                     exit_px, why = o, f"{stop_label} (gap down)"
                 elif lo <= pos.stop_price:
                     exit_px, why = pos.stop_price, stop_label
-                elif h >= pos.target_price:
+                elif not pos.trailing_only and h >= pos.target_price:
                     exit_px, why = max(o, pos.target_price), "target reached"
                 if exit_px is not None:
                     t = self._close(pos, exit_px, why + " (GTT)", ts.date())
@@ -324,12 +327,16 @@ class SignalDesk:
                     if d >= ts.date():
                         n = len(pd.bdate_range(ts.date(), d)) - 1
                         ev_days = n if ev_days is None else min(ev_days, n)
-                res = manage_position(pos, row, regime, self.exits_cfg, False, ev_days, per_share)
+                res = strat.manage(pos, row, regime, False, ev_days, per_share)
                 if res.new_stop is not None:
                     pos.stop_price = res.new_stop
                     actions = [a for a in actions if not a.startswith("MODIFY")]
-                    actions.append(f"MODIFY your GTT: stop trigger {_f(pos.stop_price)}, "
-                                   f"stop limit {_f(self._stop_limit(pos.stop_price))}, target {_f(pos.target_price)}")
+                    if pos.trailing_only:
+                        actions.append(f"RAISE your GTT stop-loss: trigger {_f(pos.stop_price)}, "
+                                       f"limit {_f(self._stop_limit(pos.stop_price))}")
+                    else:
+                        actions.append(f"MODIFY your GTT: stop trigger {_f(pos.stop_price)}, "
+                                       f"stop limit {_f(self._stop_limit(pos.stop_price))}, target {_f(pos.target_price)}")
                 if res.exit_reason:
                     pos.pending_exit_reason = res.exit_reason
                 last_bar[pos.symbol] = ts.date().isoformat()
@@ -360,7 +367,7 @@ class SignalDesk:
         elif not breaker.allow_entries:
             plan_lines.append("No new trades: " + "; ".join(breaker.reasons))
         else:
-            cands = scan(frames, bar_day, self.s, rs_panel, {s: uni.get(s, "UNKNOWN") for s in frames}, events)
+            cands = strat.scan(prep, bar_day, {s: uni.get(s, "UNKNOWN") for s in frames}, events)
             rets = returns_panel(frames)
             held = [p.symbol for p in positions]
             pseudo = list(positions)
@@ -424,6 +431,17 @@ class SignalDesk:
 
     def _plan_text(self, i, cand, decision) -> str:
         p = cand.plan
+        if p.trailing_only:
+            return (
+                f"{i}) {p.symbol} - {p.setup.value}, strength rank {cand.card.total:g}/100 ({p.notes})\n"
+                f"   STEP 1 (after 9:30 AM): Stop-Limit BUY, Delivery/CNC, qty {p.quantity}, "
+                f"trigger {_f(p.trigger_price)}, limit {_f(p.limit_price)}. Day order - expires by itself if not triggered.\n"
+                f"   STEP 2 (as soon as it fills): GTT single-trigger SELL {p.quantity} (stop-loss) - trigger {_f(p.stop_price)}, "
+                f"limit {_f(self._stop_limit(p.stop_price))}. No target: the bot tells you when to raise the stop.\n"
+                f"   STEP 3: record it -> took {p.symbol} {p.quantity} <fill price>\n"
+                f"   Risk {_f(decision.risk_amount)} (trailing stop; max hold {self.s.get('momentum.max_hold_days', 20)} days), "
+                f"est. charges {_f(decision.est_costs)}"
+            )
         return (
             f"{i}) {p.symbol} - {p.setup.value}, score {cand.card.total:g}/100 ({p.notes})\n"
             f"   STEP 1 (after 9:30 AM): Stop-Limit BUY, Delivery/CNC, qty {p.quantity}, "

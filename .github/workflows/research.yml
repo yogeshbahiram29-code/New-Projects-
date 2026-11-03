@@ -1,0 +1,52 @@
+# Strategy research on real NSE data (free, on GitHub's servers).
+# Compares the old strategy with the new momentum variants on the SAME data.
+# Data is physically cut at "end" so the later out-of-sample years stay untouched.
+name: Research
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "first trading day of the test window"
+        default: "2015-01-01"
+        required: true
+      end:
+        description: "last day of data loaded (keep 2023+ untouched until the final test)"
+        default: "2022-12-31"
+        required: true
+
+permissions:
+  contents: write   # to save the downloaded NIFTY 500 list (config/universe.csv)
+
+concurrency:
+  group: swingbot-journal
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install pandas numpy PyYAML requests yfinance
+      - name: Refresh universe (NIFTY 500 from NSE; keeps the old list if NSE blocks the download)
+        shell: bash
+        run: |
+          python -m swingbot update-universe || echo "NIFTY 500 download failed - using the existing list"
+          echo "Universe size: $(($(wc -l < config/universe.csv) - 1)) + $(($(wc -l < config/universe_extra.csv) - 1)) fallen/merged names"
+      - name: Research run (in-sample)
+        shell: bash
+        env:
+          PYTHONWARNINGS: ignore
+        run: python -m swingbot research --start "${{ inputs.start }}" --end "${{ inputs.end }}" 2>&1 | grep -v "Pandas4Warning\|inplace\|whatsnew\|Failed download\|possibly delisted"
+      - name: Save universe list
+        if: always()
+        run: |
+          git config user.name "swingbot"
+          git config user.email "swingbot@users.noreply.github.com"
+          git add config/universe.csv
+          git diff --cached --quiet || (git commit -m "universe: NIFTY 500 list from NSE" && git pull --rebase && git push)
