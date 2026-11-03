@@ -1,0 +1,45 @@
+# FREE daily swing signals on GitHub's servers - no PC, no paid server.
+# Runs Mon-Fri after the NSE close and WhatsApps you the day's instructions.
+#
+# One-time setup (repo -> Settings -> Secrets and variables -> Actions):
+#   WHATSAPP_PHONE      e.g. +9198XXXXXXXX
+#   CALLMEBOT_API_KEY   from CallMeBot (see README)
+# Scheduled workflows only run from the repository's DEFAULT branch.
+name: Daily swing signals
+
+on:
+  schedule:
+    - cron: "15 11 * * 1-5"   # 11:15 UTC = 16:45 IST, Monday-Friday
+  workflow_dispatch: {}       # "Run workflow" button for a manual run
+
+permissions:
+  contents: write             # to save the journal (your positions) back to the repo
+
+concurrency:
+  group: swingbot-journal
+  cancel-in-progress: false
+
+jobs:
+  signals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install pandas numpy PyYAML requests yfinance
+      - name: Analyse market and send WhatsApp signals
+        env:
+          WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}
+          CALLMEBOT_API_KEY: ${{ secrets.CALLMEBOT_API_KEY }}
+        run: python -m swingbot signals
+      - name: Save journal
+        run: |
+          git config user.name "swingbot"
+          git config user.email "swingbot@users.noreply.github.com"
+          git add journal/
+          git diff --cached --quiet || git commit -m "journal: signals $(date -u +%F)"
+          git push

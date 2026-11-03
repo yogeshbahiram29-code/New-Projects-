@@ -580,6 +580,8 @@ Each phase has a clear finish line. We move to the next phase only when the curr
 | Stocks | "Best trade setup" | NIFTY 500 universe, filtered by liquidity. Only setups that score at least 70 (bull) or 80 (neutral) **and** pass every risk rule are traded. |
 | Alerts | WhatsApp | CallMeBot (free, personal) or the Meta WhatsApp Cloud API. Every alert is also written to `state/alerts.log`. |
 
+**Follow-up: "I want free swing trading."** Added a **₹0 signal mode** (`python -m swingbot signals`). It runs the same analysis and risk engine, then sends the exact orders on WhatsApp for you to place in the app. It needs no server, no broker API and no static IP. It runs on GitHub Actions or a laptop, and Zerodha charges ₹0 brokerage on delivery. Your positions are kept in `journal/`.
+
 **Design changes made during implementation:**
 - **Decisions are made after the close; orders are held by the broker.** Entries are stop-limit BUY orders valid for one day. Stops and targets are broker-side OCO orders: GTT two-leg on Kite, a smart OCO order on Groww. The bot therefore needs only end-of-day data. Positions stay protected even if the server goes down.
 - **Close-based exits run at the next open.** Trend breaks and time stops are decided on the completed daily candle and executed at the next morning's open. This matches the backtester exactly.

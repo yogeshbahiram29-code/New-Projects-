@@ -18,11 +18,98 @@ The full design (strategy, risk rules, why each one exists) is in **[docs/SWING_
 
 ---
 
+## 🆓 ₹0 swing trading: free signal mode (start here)
+
+You don't need a paid server or a paid broker API. In **signal mode**:
+1. The bot does all the analysis and risk management.
+2. It sends you the exact orders on WhatsApp.
+3. You place them in the Zerodha or Groww app (about 2 minutes a day).
+
+It uses the same strategy, scoring and risk rules as the automatic mode.
+
+| Cost item | Free option | Cost |
+|---|---|---|
+| Brokerage | **Zerodha: ₹0 on delivery trades.** Swing trades are delivery trades. (Groww charges ₹5–20 per order.) | ₹0 |
+| Broker API | Not needed: you place the orders yourself | ₹0 |
+| Server / static IP | Not needed: runs on **GitHub Actions** (free) or your own laptop | ₹0 |
+| Market data | Yahoo Finance end-of-day data | ₹0 |
+| WhatsApp alerts | CallMeBot | ₹0 |
+| Govt taxes and DP charge | STT 0.1% each side, stamp duty, exchange fees, about ₹16 DP charge per sell. **No broker can waive these.** | about ₹25 on a ₹4,000 trade |
+
+### What a daily message looks like
+
+```
+SWING SIGNALS - data to Wed 03 Nov
+Market: BULL | breadth 87%
+Equity ₹10,228.79 (from peak -3.4%) | risk profile micro
+
+YOUR POSITIONS (1)
+- TATASTEEL 24 sh @ ₹165.20, now ₹171.90 (+1.20R), stop ₹165.80
+   >> MODIFY your GTT: stop trigger ₹165.80, stop limit ₹157.51, target ₹183.00
+
+NEW TRADES FOR NEXT SESSION
+1) HAL - pullback, score 86/100
+   STEP 1 (after 9:30 AM): Stop-Limit BUY, Delivery/CNC, qty 1, trigger ₹4,222.86, limit ₹4,243.97.
+          Day order - expires by itself if not triggered.
+   STEP 2 (as soon as it fills): GTT OCO SELL 1 - stop trigger ₹4,077.78, target ₹4,658.10.
+   STEP 3: record it -> took HAL 1 <fill price>
+   Risk ₹145, reward:risk 3.0, est. charges ₹26
+```
+
+(Illustration only; the prices are made up.)
+
+### Your daily routine
+
+1. **About 4:45 PM:** the WhatsApp message arrives.
+2. **Next morning after 9:30:** place the Stop-Limit BUY it lists. If the price never reaches the trigger, nothing happens and the order expires at the close.
+3. **When it fills:** immediately set the **GTT OCO**, which holds the stop-loss and the target together. In Kite this is *GTT → OCO*.
+4. **Record the fill:**
+   * **On a laptop:** `python -m swingbot took HAL 1 4225`
+   * **On a phone (GitHub setup):** GitHub app → Actions → *Record trade* → Run workflow
+5. **Exits:**
+   * Stop-loss and target exits happen by themselves through your GTT. The bot notices them from the price data and updates your journal.
+   * When the message says **SELL at tomorrow's open** (trend break, time stop, results ahead), sell at market after 9:15. Then record it: `sold HAL <price>`.
+   * When it says **MODIFY your GTT**, raise the stop in the app. Never move a stop down.
+
+### Option 1: run it free on GitHub (no PC needed)
+
+1. Merge this branch into your repo's default branch. Scheduled workflows only run there.
+2. In the repo, go to **Settings → Secrets and variables → Actions** and add two secrets:
+   * `WHATSAPP_PHONE` (for example `+9198XXXXXXXX`)
+   * `CALLMEBOT_API_KEY` (see WhatsApp setup below)
+3. Done. `.github/workflows/swing-signals.yml` runs Monday to Friday at 4:45 PM IST and saves your journal in `journal/`.
+   * Free GitHub accounts include enough minutes for this: about 2 minutes a day.
+   * GitHub can start scheduled runs 10–30 minutes late.
+
+### Option 2: run it free on your laptop
+
+```bash
+pip install pandas numpy PyYAML requests yfinance
+python -m swingbot signals          # run once after 3:30 PM; schedule it daily:
+                                    #   Windows: Task Scheduler -> scripts\run_signals.bat (Mon-Fri 4:45 PM)
+                                    #   Linux/Mac: cron -> scripts/run_signals.sh
+python -m swingbot journal          # your positions and results
+```
+
+Before trusting any signal, run the backtest on real history (`python -m swingbot backtest --start 2015-01-01 --capital 1000000`). Only follow the signals if it says **READY FOR PAPER TRADING**.
+
+### Fully automatic and still free?
+
+That is possible, with two catches:
+* **Broker API:** Zerodha's *Kite Connect Personal* API is free for orders and GTT. It needs **one login tap every morning**.
+* **Static IP:** since April 2026, SEBI requires API orders to come from a **registered static IP**. The only ₹0 route is Oracle Cloud's *Always Free* VM with a reserved IP, which works but is often out of capacity in Indian regions.
+
+Groww's free API plan excludes live data (₹499/month for everything). The bot doesn't need live data, so the free plan should be enough, but check its current terms in the app.
+
+Use signal mode now, and switch to the automatic mode (the rest of this README) if you get a free static-IP server.
+
+---
+
 ## Your configuration (decided with you)
 
 | Item | Setting |
 |---|---|
-| Brokers | Groww (recommended for full automation) or Zerodha |
+| Brokers | **Zerodha recommended for ₹0 trading** (no delivery brokerage, free API). Groww is supported too: automatic login, but brokerage is charged on every order |
 | Trial capital | **₹10,000**. The bot never commits more than this plus its own profits, even if your account holds more |
 | Automation | Fully automatic |
 | Stocks | Liquid NIFTY 500 stocks; only the highest-scoring setups are traded |
@@ -217,5 +304,5 @@ journalctl -u swingbot -f
 ## Tests
 
 ```bash
-pytest -q        # 37 tests: risk rules, exits, costs, setups, paper broker, backtester, end-to-end engine
+pytest -q        # 41 tests: risk rules, exits, costs, setups, paper broker, backtester, end-to-end engine, free signal mode
 ```

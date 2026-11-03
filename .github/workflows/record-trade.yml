@@ -1,0 +1,75 @@
+# Record a buy or sell from your phone: GitHub app -> Actions -> "Record trade" -> Run workflow.
+name: Record trade
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "took = you bought, sold = you sold"
+        required: true
+        type: choice
+        options: [took, sold]
+      symbol:
+        description: "NSE symbol, e.g. TATASTEEL"
+        required: true
+      price:
+        description: "your fill price"
+        required: true
+      quantity:
+        description: "shares (required for took; optional for sold = all)"
+        required: false
+      stop:
+        description: "optional: override stop (took only)"
+        required: false
+      target:
+        description: "optional: override target (took only)"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: swingbot-journal
+  cancel-in-progress: false
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install pandas numpy PyYAML requests
+      - name: Record
+        env:
+          ACTION: ${{ inputs.action }}
+          SYMBOL: ${{ inputs.symbol }}
+          PRICE: ${{ inputs.price }}
+          QTY: ${{ inputs.quantity }}
+          STOP: ${{ inputs.stop }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -e
+          if [ "$ACTION" = "took" ]; then
+            ARGS=("$SYMBOL" "$QTY" "$PRICE")
+            [ -n "$STOP" ] && ARGS+=(--stop "$STOP")
+            [ -n "$TARGET" ] && ARGS+=(--target "$TARGET")
+            python -m swingbot took "${ARGS[@]}"
+          else
+            ARGS=("$SYMBOL" "$PRICE")
+            [ -n "$QTY" ] && ARGS+=(--qty "$QTY")
+            python -m swingbot sold "${ARGS[@]}"
+          fi
+          python -m swingbot journal
+      - name: Save journal
+        run: |
+          git config user.name "swingbot"
+          git config user.email "swingbot@users.noreply.github.com"
+          git add journal/
+          git diff --cached --quiet || git commit -m "journal: $ACTION $SYMBOL"
+          git push
+        env:
+          ACTION: ${{ inputs.action }}
+          SYMBOL: ${{ inputs.symbol }}

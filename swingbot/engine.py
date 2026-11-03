@@ -281,7 +281,7 @@ class LiveEngine:
             return
         try:
             quotes = self.b.ltp([p.symbol for p in self.db.positions()]) if self.db.positions() else {}
-        except NotSupported:
+        except (NotSupported, BrokerError):  # e.g. free API plans without live quotes
             quotes = {}
         for pos in self.db.positions():
             reason = pos.pending_exit_reason
@@ -339,7 +339,7 @@ class LiveEngine:
         bot_syms = {p.symbol for p in self.db.positions()}
         try:
             quotes = self.b.ltp([p.symbol for p in plans])
-        except NotSupported:
+        except (NotSupported, BrokerError):  # e.g. free API plans without live quotes
             quotes = {}
         corr_map = self.db.get("plan_corr", {}) or {}
         adv_map = self.db.get("plan_adv", {}) or {}
@@ -431,7 +431,7 @@ class LiveEngine:
             self.reconcile()
             try:
                 quotes = self.b.ltp([p.symbol for p in self.db.positions()])
-            except NotSupported:
+            except (NotSupported, BrokerError):  # e.g. free API plans without live quotes
                 quotes = {}
             if quotes:
                 lp = self.last_prices()

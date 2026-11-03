@@ -170,6 +170,14 @@ schedule:
   market_close: "15:30"
   holidays: []                    # add NSE trading holidays as "YYYY-MM-DD"
 
+# ---------------------------------------------------------------------
+# FREE signal mode (python -m swingbot signals): no server, no broker API.
+# The bot WhatsApps exact orders; you place them in the app.
+# ---------------------------------------------------------------------
+signals:
+  dir: journal                    # your positions + trade history (plain CSV/JSON)
+  broker_costs: zerodha           # zerodha = ₹0 brokerage on delivery (cheapest for swing trades)
+
 notifications:
   whatsapp_provider: callmebot    # callmebot | meta | none
   daily_report: true

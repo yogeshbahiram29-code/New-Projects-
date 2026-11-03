@@ -12,6 +12,12 @@
   kite-login TOK  finish the daily Zerodha login with the request_token from the redirect URL
   update-universe download the latest NIFTY 500 list from NSE
   test-whatsapp   send a test WhatsApp message
+
+FREE SIGNAL MODE (no server, no broker API - you place orders in the app):
+  signals         daily after-close run: WhatsApps exact orders + position updates
+  took SYM QTY PX record that you bought (stop/target come from the plan)
+  sold SYM PX     record that you sold
+  journal         your positions and closed-trade stats
 """
 from __future__ import annotations
 
@@ -276,6 +282,63 @@ def cmd_test_whatsapp(args, settings) -> int:
     return 0 if ok else 1
 
 
+def _desk(settings, need_data: bool = False):
+    from .data import CachedData, make_provider
+    from .notify import Notifier
+    from .signals import SignalDesk
+
+    loader = CachedData(make_provider(settings), settings.get("data.cache_dir", "data_cache")) if need_data else None
+    notifier = Notifier(settings.get("notifications.whatsapp_provider", "callmebot"), settings.get("paths.state_dir", "state"))
+    return SignalDesk(settings, loader, notifier)
+
+
+def cmd_signals(args, settings) -> int:
+    from .data import DataError
+    from .signals import SignalError
+
+    try:
+        print(_desk(settings, need_data=True).run(send=not args.no_whatsapp))
+    except (DataError, SignalError) as e:
+        print(f"ERROR: {e}")
+        return 1
+    return 0
+
+
+def cmd_took(args, settings) -> int:
+    from .signals import SignalError
+
+    try:
+        p = _desk(settings).took(args.symbol, args.qty, args.price, args.stop, args.target)
+    except SignalError as e:
+        print(f"ERROR: {e}")
+        return 1
+    print(f"Recorded BUY {p.quantity} {p.symbol} @ ₹{p.entry_price:.2f} - stop ₹{p.stop_price:.2f}, target ₹{p.target_price:.2f}.\n"
+          f"Make sure your GTT OCO (stop + target) is set in the app.")
+    return 0
+
+
+def cmd_sold(args, settings) -> int:
+    from .signals import SignalError
+
+    try:
+        t = _desk(settings).sold(args.symbol, args.price, args.qty, args.reason or "manual sell")
+    except SignalError as e:
+        print(f"ERROR: {e}")
+        return 1
+    if t:
+        print(f"Recorded SELL {t.symbol} @ ₹{t.exit_price:.2f}: P&L ₹{t.pnl:,.2f} ({t.r_multiple:+.2f}R)")
+    else:
+        print("Recorded partial sell.")
+    return 0
+
+
+def cmd_journal(args, settings) -> int:
+    from .signals import journal_summary
+
+    print(journal_summary(_desk(settings)))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     ap = argparse.ArgumentParser(prog="swingbot", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -305,6 +368,20 @@ def main(argv: list[str] | None = None) -> int:
     kl.add_argument("request_token")
     sub.add_parser("update-universe")
     sub.add_parser("test-whatsapp")
+    sg = sub.add_parser("signals", help="free mode: daily WhatsApp trade instructions")
+    sg.add_argument("--no-whatsapp", action="store_true", help="only print")
+    tk = sub.add_parser("took", help="free mode: record a buy")
+    tk.add_argument("symbol")
+    tk.add_argument("qty", type=int)
+    tk.add_argument("price", type=float)
+    tk.add_argument("--stop", type=float)
+    tk.add_argument("--target", type=float)
+    sd = sub.add_parser("sold", help="free mode: record a sell")
+    sd.add_argument("symbol")
+    sd.add_argument("price", type=float)
+    sd.add_argument("--qty", type=int)
+    sd.add_argument("--reason")
+    sub.add_parser("journal", help="free mode: positions and stats")
     args = ap.parse_args(argv)
 
     overrides = {}
@@ -319,6 +396,7 @@ def main(argv: list[str] | None = None) -> int:
         "backtest": cmd_backtest, "scan": cmd_scan, "run": cmd_run, "job": cmd_job, "status": cmd_status,
         "kill": cmd_kill, "resume": cmd_resume, "preflight": cmd_preflight, "kite-login-url": cmd_kite_login,
         "kite-login": cmd_kite_login, "update-universe": cmd_update_universe, "test-whatsapp": cmd_test_whatsapp,
+        "signals": cmd_signals, "took": cmd_took, "sold": cmd_sold, "journal": cmd_journal,
     }
     return handlers[args.cmd](args, settings)
 
