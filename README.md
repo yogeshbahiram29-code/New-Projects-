@@ -71,6 +71,19 @@ NEW TRADES FOR NEXT SESSION
    * When the message says **SELL at tomorrow's open** (trend break, time stop, results ahead), sell at market after 9:15. Then record it: `sold HAL <price>`.
    * When it says **MODIFY your GTT**, raise the stop in the app. Never move a stop down.
 
+### If WhatsApp (CallMeBot) doesn't reply
+
+CallMeBot is a free shared bot, and it **changes its phone number from time to time**.
+* Open **https://www.callmebot.com/blog/free-api-whatsapp-messages/** in your browser and use the number shown there.
+* Send the activation message again. If there is no reply within 2 minutes, try again after 24 hours.
+* `CALLMEBOT_API_KEY` must be the number it sends back to you. Every run now prints CallMeBot's reply in the log, and the run turns red if the key is wrong.
+
+**Free, reliable backup: Telegram**
+1. In Telegram, open **@BotFather**, send `/newbot`, and copy the **token** it gives you.
+2. Send any message (for example "hi") to your new bot.
+3. Open `https://api.telegram.org/bot<TOKEN>/getUpdates` in your browser and copy the number after `"chat":{"id":`.
+4. In GitHub, add the secrets `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, and the **variable** (Variables tab) `NOTIFY_PROVIDER` = `telegram`.
+
 ### Option 1: run it free on GitHub (no PC needed)
 
 1. Merge this branch into your repo's default branch. Scheduled workflows only run there.

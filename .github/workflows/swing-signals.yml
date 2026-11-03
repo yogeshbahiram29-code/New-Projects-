@@ -36,6 +36,10 @@ jobs:
           # repository secrets preferred; repository variables accepted as a fallback
           WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE || vars.WHATSAPP_PHONE }}
           CALLMEBOT_API_KEY: ${{ secrets.CALLMEBOT_API_KEY || vars.CALLMEBOT_API_KEY }}
+          # optional backup channel: set repository variable NOTIFY_PROVIDER=telegram
+          NOTIFY_PROVIDER: ${{ vars.NOTIFY_PROVIDER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
           PYTHONWARNINGS: ignore      # hide library deprecation noise in the log
         run: python -m swingbot signals
       - name: Save journal
