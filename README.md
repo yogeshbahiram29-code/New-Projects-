@@ -81,8 +81,8 @@ CallMeBot is a free shared bot, and it **changes its phone number from time to t
 **Free, reliable backup: Telegram**
 1. In Telegram, open **@BotFather**, send `/newbot`, and copy the **token** it gives you.
 2. Send any message (for example "hi") to your new bot.
-3. Open `https://api.telegram.org/bot<TOKEN>/getUpdates` in your browser and copy the number after `"chat":{"id":`.
-4. In GitHub, add the secrets `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, and the **variable** (Variables tab) `NOTIFY_PROVIDER` = `telegram`.
+3. In GitHub, add the secret `TELEGRAM_BOT_TOKEN` and the **variable** (Variables tab) `NOTIFY_PROVIDER` = `telegram`.
+4. Run the workflow within 24 hours of sending "hi". The bot finds your chat ID by itself and remembers it in `journal/telegram.json`. A `TELEGRAM_CHAT_ID` secret is optional.
 
 ### Option 1: run it free on GitHub (no PC needed)
 

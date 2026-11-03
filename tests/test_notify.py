@@ -51,3 +51,35 @@ def test_telegram_and_env_override(monkeypatch, tmp_path):
     assert n.provider == "telegram" and n.send("hi") is True
     monkeypatch.setattr(notify.requests, "post", lambda *a, **k: Resp(401, "Unauthorized", {"ok": False}))
     assert n.send("hi") is False
+
+
+def test_telegram_autodetects_chat_id(monkeypatch, tmp_path):
+    monkeypatch.setenv("NOTIFY_PROVIDER", "telegram")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", " '7123456789' ")  # wrong id (e.g. the bot's own id)
+    sent = []
+
+    def post(url, json=None, timeout=None):
+        sent.append(json["chat_id"])
+        if json["chat_id"] == "555":
+            return Resp(200, payload={"ok": True})
+        return Resp(400, '{"ok":false,"description":"Bad Request: chat not found"}', {"ok": False})
+
+    updates = {"ok": True, "result": [{"update_id": 1, "message": {"chat": {"id": 555, "type": "private"}}}]}
+    monkeypatch.setattr(notify.requests, "post", post)
+    monkeypatch.setattr(notify.requests, "get", lambda *a, **k: Resp(200, payload=updates))
+    store = tmp_path / "journal" / "telegram.json"
+    n = Notifier("telegram", tmp_path, store_path=store)
+    assert n.send("hi") is True
+    assert sent == ["7123456789", "555"]
+    assert '"555"' in store.read_text()
+    # next run: remembered id works even with the wrong secret still set
+    sent.clear()
+    assert Notifier("telegram", tmp_path, store_path=store).send("again") is True
+    assert sent[-1] == "555"
+
+
+def test_telegram_no_chat_found(monkeypatch, tmp_path):
+    monkeypatch.setenv("NOTIFY_PROVIDER", "telegram")
+    monkeypatch.delenv("TELEGRAM_CHAT_ID")
+    monkeypatch.setattr(notify.requests, "get", lambda *a, **k: Resp(200, payload={"ok": True, "result": []}))
+    assert Notifier("telegram", tmp_path).send("hi") is False

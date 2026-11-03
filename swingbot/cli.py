@@ -288,7 +288,8 @@ def _desk(settings, need_data: bool = False):
     from .signals import SignalDesk
 
     loader = CachedData(make_provider(settings), settings.get("data.cache_dir", "data_cache")) if need_data else None
-    notifier = Notifier(settings.get("notifications.whatsapp_provider", "callmebot"), settings.get("paths.state_dir", "state"))
+    notifier = Notifier(settings.get("notifications.whatsapp_provider", "callmebot"), settings.get("paths.state_dir", "state"),
+                        store_path=Path(settings.get("signals.dir", "journal")) / "telegram.json")
     return SignalDesk(settings, loader, notifier)
 
 

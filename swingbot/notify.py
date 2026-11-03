@@ -17,6 +17,7 @@ WhatsApp is down.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -36,7 +37,7 @@ MAX_LEN = 1500
 REQUIRED_ENV = {
     "callmebot": ("WHATSAPP_PHONE", "CALLMEBOT_API_KEY"),
     "meta": ("WHATSAPP_PHONE", "META_WA_TOKEN", "META_WA_PHONE_NUMBER_ID"),
-    "telegram": ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"),
+    "telegram": ("TELEGRAM_BOT_TOKEN",),  # chat id is auto-detected if missing or wrong
 }
 
 
@@ -53,10 +54,67 @@ class Notifier:
     can switch channel from GitHub repository variables without editing code.
     """
 
-    def __init__(self, provider: str, log_dir: str | Path):
+    def __init__(self, provider: str, log_dir: str | Path, store_path: str | Path | None = None):
         self.provider = os.environ.get("NOTIFY_PROVIDER") or provider
         self.log_path = Path(log_dir) / "alerts.log"
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        # where an auto-detected Telegram chat id is remembered (journal/ on GitHub, so it persists)
+        self.store_path = Path(store_path) if store_path else Path(log_dir) / "telegram.json"
+
+    # -- telegram chat id ----------------------------------------------------
+    def _stored_chat_id(self) -> str | None:
+        try:
+            return json.loads(self.store_path.read_text()).get("chat_id")
+        except (OSError, ValueError):
+            return None
+
+    def _save_chat_id(self, chat_id: str) -> None:
+        try:
+            self.store_path.parent.mkdir(parents=True, exist_ok=True)
+            self.store_path.write_text(json.dumps({"chat_id": chat_id}))
+        except OSError as e:
+            log.warning("could not save telegram chat id: %s", e)
+
+    @staticmethod
+    def discover_chat_id(token: str) -> str | None:
+        """Chat id of the most recent private message sent to the bot (Telegram keeps ~24 h)."""
+        r = requests.get(f"https://api.telegram.org/bot{token}/getUpdates", timeout=20)
+        for upd in reversed(r.json().get("result", []) if r.status_code < 300 else []):
+            for key in ("message", "edited_message", "my_chat_member"):
+                chat = (upd.get(key) or {}).get("chat") or {}
+                if chat.get("type") == "private" and chat.get("id") is not None:
+                    return str(chat["id"])
+        return None
+
+    def _telegram_send(self, text: str) -> bool:
+        token = env("TELEGRAM_BOT_TOKEN").strip().strip('"').strip("'")
+        tried: list[str] = []
+        # tolerate pasted extras like quotes, spaces or 'id:' - keep digits and a leading minus
+        configured = re.sub(r"[^0-9-]", "", os.environ.get("TELEGRAM_CHAT_ID", ""))
+        candidates = [configured, self._stored_chat_id()]
+        for attempt in range(2):
+            for chat_id in [c for c in candidates if c and c not in tried]:
+                tried.append(chat_id)
+                r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                                  json={"chat_id": chat_id, "text": text}, timeout=20)
+                if r.status_code < 300 and r.json().get("ok"):
+                    if chat_id != self._stored_chat_id():
+                        self._save_chat_id(chat_id)
+                    return True
+                log.warning("telegram send to chat %s failed (%s): %s", chat_id, r.status_code, r.text[:200])
+                if r.status_code in (401, 404):
+                    log.warning("telegram: TELEGRAM_BOT_TOKEN is wrong (copy it again from @BotFather)")
+                    return False
+            if attempt == 0:  # nothing worked: look up who has messaged the bot
+                found = self.discover_chat_id(token)
+                if found and found not in tried:
+                    log.warning("telegram: auto-detected your chat id %s - using it from now on", found)
+                    candidates = [found]
+                    continue
+                log.warning("telegram: could not find your chat. Open YOUR bot in Telegram, press START, "
+                            "send 'hi', then run the workflow again within 24 hours.")
+                return False
+        return False
 
     def send(self, text: str, urgent: bool = False) -> bool:
         prefix = "🚨 " if urgent else ""
@@ -110,17 +168,7 @@ class Notifier:
                     if r.status_code < 300:
                         return True
                 else:  # telegram
-                    r = requests.post(
-                        f"https://api.telegram.org/bot{env('TELEGRAM_BOT_TOKEN')}/sendMessage",
-                        json={"chat_id": env("TELEGRAM_CHAT_ID"), "text": text},
-                        timeout=20,
-                    )
-                    if r.status_code < 300 and r.json().get("ok"):
-                        return True
-                    if "chat not found" in r.text:
-                        log.warning("telegram: TELEGRAM_CHAT_ID is wrong, or you haven't pressed START / sent a "
-                                    "message to your bot yet. Use the number after \"chat\":{\"id\": in getUpdates "
-                                    "(not the number at the start of the token).")
+                    return self._telegram_send(text)
                 log.warning("%s send failed (%s): %s", self.provider, r.status_code, r.text[:200])
                 if 400 <= r.status_code < 500 and r.status_code != 429:
                     return False  # bad token / chat id: retrying won't help
