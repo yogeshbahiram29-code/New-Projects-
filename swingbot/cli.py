@@ -303,9 +303,12 @@ def cmd_signals(args, settings) -> int:
         print(f"ERROR: {e}")
         return 1
     if desk.sent_ok is False:
-        print("ERROR: the alert was NOT delivered (see the 'callmebot replied' / warning lines above). "
-              "Check WHATSAPP_PHONE and CALLMEBOT_API_KEY - the key must be the number CallMeBot sent you - "
-              "or switch to Telegram (README).")
+        provider = desk.n.provider if desk.n else "?"
+        hint = {
+            "telegram": "Check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID (see the warning lines above).",
+            "callmebot": "Check WHATSAPP_PHONE and CALLMEBOT_API_KEY - the key must be the number CallMeBot sent you.",
+        }.get(provider, "Check the notification settings.")
+        print(f"ERROR: the {provider} alert was NOT delivered. {hint}")
         return 3  # makes the GitHub run go red so a silent failure can't go unnoticed
     return 0
 

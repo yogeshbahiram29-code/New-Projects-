@@ -117,6 +117,10 @@ class Notifier:
                     )
                     if r.status_code < 300 and r.json().get("ok"):
                         return True
+                    if "chat not found" in r.text:
+                        log.warning("telegram: TELEGRAM_CHAT_ID is wrong, or you haven't pressed START / sent a "
+                                    "message to your bot yet. Use the number after \"chat\":{\"id\": in getUpdates "
+                                    "(not the number at the start of the token).")
                 log.warning("%s send failed (%s): %s", self.provider, r.status_code, r.text[:200])
                 if 400 <= r.status_code < 500 and r.status_code != 429:
                     return False  # bad token / chat id: retrying won't help
