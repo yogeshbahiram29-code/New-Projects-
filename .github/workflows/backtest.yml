@@ -1,0 +1,41 @@
+# Backtest the strategy on real NSE history (free, on GitHub's servers).
+# Actions -> "Backtest" -> Run workflow. Results: the job log + downloadable "backtest-*" artifacts.
+name: Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "first trading day to test (YYYY-MM-DD)"
+        default: "2015-01-01"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        capital: [1000000, 10000]   # 10 lakh = enough trades to judge the edge; 10k = your account
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install pandas numpy PyYAML requests yfinance
+      - name: Run backtest
+        shell: bash                 # explicit bash = pipefail, so a crash still fails the step
+        env:
+          PYTHONWARNINGS: ignore
+        run: python -m swingbot backtest --start "${{ inputs.start }}" --capital ${{ matrix.capital }} --costs zerodha 2>&1 | grep -v "Pandas4Warning\|inplace\|whatsnew"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backtest-${{ matrix.capital }}
+          path: reports/
+          if-no-files-found: ignore
