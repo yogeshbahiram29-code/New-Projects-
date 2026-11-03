@@ -234,13 +234,29 @@ def load_full_universe(settings) -> dict[str, str]:
     return uni
 
 
+NIFTY500_URLS = [
+    NIFTY500_URL,
+    "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv",
+    "https://archives.nseindia.com/content/indices/ind_nifty500list.csv",
+]
+
+
 def download_nifty500(dest: str | Path) -> int:
-    """Refresh the universe from NSE's official NIFTY 500 constituents file."""
-    r = requests.get(NIFTY500_URL, headers=UA, timeout=30)
-    r.raise_for_status()
-    rows = list(csv.DictReader(io.StringIO(r.text)))
+    """Refresh the universe from the official NIFTY 500 constituents file (tries several NSE mirrors)."""
+    rows, errors = [], []
+    for url in NIFTY500_URLS:
+        try:
+            r = requests.get(url, headers=UA, timeout=30)
+            r.raise_for_status()
+            rows = list(csv.DictReader(io.StringIO(r.text)))
+            if len(rows) >= 400:
+                log.info("NIFTY 500 list from %s", url)
+                break
+            errors.append(f"{url}: only {len(rows)} rows")
+        except Exception as e:
+            errors.append(f"{url}: {type(e).__name__}")
     if len(rows) < 400:
-        raise DataError(f"unexpected NIFTY 500 file ({len(rows)} rows)")
+        raise DataError("could not download the NIFTY 500 list: " + "; ".join(errors))
     with open(dest, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["symbol", "sector"])
