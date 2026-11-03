@@ -1,0 +1,24 @@
+{
+  "account": {
+    "equity": 10000.0,
+    "cash": 10000.0,
+    "peak_equity": 10000.0,
+    "day_start_equity": 10000.0,
+    "week_start_equity": 10000.0,
+    "month_start_equity": 10000.0,
+    "current_day": "2026-11-03",
+    "current_week": "2026-W45",
+    "current_month": "2026-11",
+    "consecutive_losses": 0,
+    "wins_since_streak": 0,
+    "streak_reduction": false,
+    "halted": false,
+    "halt_reason": "",
+    "entries_today": 0,
+    "orders_today": 0,
+    "trade_equity_curve": []
+  },
+  "meta": {
+    "last_bar": "2026-11-03"
+  }
+}
