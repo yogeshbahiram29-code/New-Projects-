@@ -216,23 +216,23 @@ Use signal mode now, and switch to the automatic mode (the rest of this README) 
 
 | Rule | Value | In rupees |
 |---|---|---|
-| Risk per trade, bull market | 2% | ₹200 |
-| Risk per trade, neutral market | 1% | ₹100 |
+| Risk per trade, bull market | 1% (your choice) | ₹100 |
+| Risk per trade, neutral market | 0.5% | ₹50 |
 | Risk per trade, bear market | 0 (no new trades) | — |
 | Max position size | 50% | ₹5,000 |
 | Max open positions | 2 | — |
-| Max total open risk ("heat") | 4% | ₹400 |
+| Max total open risk ("heat") | 2% | ₹200 |
 | Daily loss limit | 2% | stops new entries for the day |
 | Weekly loss limit | 4% | stops new entries for the week |
 | Full stop | 15% below peak | bot halts at ₹8,500 until you review and resume |
 
-Why the trial uses 2% and not 1%: on a ₹10,000 account, fixed charges hurt more. The DP charge alone is about ₹16 on every sell. With fewer, slightly larger positions, charges stay small compared with the expected profit. These limits switch automatically as the account grows:
+On a ₹10,000 account, fixed charges hurt more: the DP charge alone is about ₹16 on every sell. So the bot skips a trade when charges would eat more than 10% of the expected reward. The limits switch automatically as the account grows:
 
 | Account size | Profile | Risk per trade |
 |---|---|---|
-| Below ₹50,000 | micro | 2% |
-| ₹50,000 to ₹5 lakh | small | 1.25% |
-| Above ₹5 lakh | standard | 1% |
+| Below ₹50,000 | micro | 1% (max 2 positions) |
+| ₹50,000 to ₹5 lakh | small | 1% (max 5 positions) |
+| Above ₹5 lakh | standard | 1% (max 8 positions) |
 
 Hard ceilings in the code (2% risk per trade, 50% per position, 8% total heat) cannot be overridden by the config file.
 
@@ -405,5 +405,5 @@ journalctl -u swingbot -f
 ## Tests
 
 ```bash
-pytest -q        # 41 tests: risk rules, exits, costs, setups, paper broker, backtester, end-to-end engine, free signal mode
+pytest -q        # 84 tests: risk rules, exits, costs, setups, backtester, engine, signal mode, odds, volume, mistakes, ML
 ```
