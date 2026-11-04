@@ -58,6 +58,19 @@ def is_fresh(df: pd.DataFrame, expected_last: date) -> bool:
 # ---------------------------------------------------------------------------
 # Providers
 # ---------------------------------------------------------------------------
+def drop_unfinished_bar(df: pd.DataFrame, now: datetime | None = None) -> pd.DataFrame:
+    """During NSE market hours today's daily candle is still forming - leave it out.
+
+    All rules are written for completed daily candles (signal on the close).
+    """
+    from zoneinfo import ZoneInfo
+
+    now = now or datetime.now(ZoneInfo("Asia/Kolkata"))
+    if len(df) and df.index[-1].date() == now.date() and (now.hour, now.minute) < (15, 45):
+        return df.iloc[:-1]
+    return df
+
+
 class YFinanceProvider:
     name = "yfinance"
     index_tickers = {"NIFTY50": "^NSEI", "NIFTY500": "^CRSLDX", "INDIAVIX": "^INDIAVIX", "BANKNIFTY": "^NSEBANK",
@@ -89,6 +102,8 @@ class YFinanceProvider:
                     sub.index = pd.to_datetime(sub.index).tz_localize(None).normalize()
                     if s in self.index_tickers:
                         sub["volume"] = sub["volume"].fillna(0)
+                    if t.endswith(".NS") or t in ("^NSEI", "^NSEBANK", "^INDIAVIX", "^CRSLDX"):
+                        sub = drop_unfinished_bar(sub)
                     out[s] = sub
                 except Exception as e:  # missing ticker etc.
                     log.warning("yfinance: %s failed: %s", s, e)

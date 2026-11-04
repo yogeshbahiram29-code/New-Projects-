@@ -91,7 +91,7 @@ class Notifier:
         tried: list[str] = []
         # tolerate pasted extras like quotes, spaces or 'id:' - keep digits and a leading minus
         configured = re.sub(r"[^0-9-]", "", os.environ.get("TELEGRAM_CHAT_ID", ""))
-        candidates = [configured, self._stored_chat_id()]
+        candidates = [self._stored_chat_id(), configured]  # the verified (auto-detected) chat first
         for attempt in range(2):
             for chat_id in [c for c in candidates if c and c not in tried]:
                 tried.append(chat_id)

@@ -92,3 +92,24 @@ def test_watchlist_shows_odds_and_fundamentals():
                         fundamentals={"X": {"marketCap": 1e11, "trailingPE": 30.0, "returnOnEquity": 0.2}})
     assert "🎲 History (2015-2026, 1,240 similar cases): 🎯 T1 first 41%" in text
     assert "🏢 Fundamentals: MCap ₹10,000 Cr | P/E 30.0 | ROE 20%" in text
+
+
+def test_unfinished_bar_dropped_only_during_market_hours():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from swingbot.data import drop_unfinished_bar
+
+    ist = ZoneInfo("Asia/Kolkata")
+    df = pd.DataFrame({"close": [1.0, 2.0]}, index=pd.to_datetime(["2026-11-03", "2026-11-04"]))
+    assert len(drop_unfinished_bar(df, datetime(2026, 11, 4, 14, 56, tzinfo=ist))) == 1
+    assert len(drop_unfinished_bar(df, datetime(2026, 11, 4, 16, 45, tzinfo=ist))) == 2
+    assert len(drop_unfinished_bar(df, datetime(2026, 11, 5, 10, 0, tzinfo=ist))) == 2
+
+
+def test_odds_labels_are_conservative():
+    base = {"period": "2015-2026", "cases": 500, "target_first_pct": 30.0, "stop_first_pct": 50.0,
+            "neither_pct": 20.0, "triggered_pct": 45.0}
+    assert "no real edge" in format_odds({**base, "avg_r": 0.03})[1]
+    assert "thin edge" in format_odds({**base, "avg_r": 0.12})[1]
+    assert "positive edge" in format_odds({**base, "avg_r": 0.3})[1]
+    assert format_fundamentals({"earningsGrowth": -0.001, "marketCap": 1e10})[0].endswith("Profit growth 0%")

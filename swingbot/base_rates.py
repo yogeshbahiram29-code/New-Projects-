@@ -153,7 +153,7 @@ def load_table(path: str | Path) -> pd.DataFrame | None:
     return pd.read_csv(p, dtype={"band": str, "regime": str, "setup": str})
 
 
-def lookup(table: pd.DataFrame | None, setup: str, score: float, regime_on: bool, min_cases: int = 30) -> dict | None:
+def lookup(table: pd.DataFrame | None, setup: str, score: float, regime_on: bool, min_cases: int = 100) -> dict | None:
     """Most specific matching row with at least ``min_cases`` triggered cases."""
     if table is None or table.empty:
         return None
@@ -174,8 +174,9 @@ def format_odds(o: dict | None) -> list[str]:
     avg = o["avg_r"]
     return [f"🎲 History ({o['period']}, {int(o['cases']):,} similar cases): 🎯 T1 first {o['target_first_pct']:.0f}% | "
             f"🔴 SL first {o['stop_first_pct']:.0f}% | ⏳ neither {o['neither_pct']:.0f}%",
-            f"   Avg result {avg:+.2f}R before charges · triggered {o['triggered_pct']:.0f}% of the time · "
-            f"{'✅ positive' if avg > 0.1 else '⚠️ weak' if avg > -0.05 else '❌ negative'} edge"]
+            f"   Avg {avg:+.2f}R before charges · triggered {o['triggered_pct']:.0f}% of the time · "
+            + ("✅ positive edge" if avg >= 0.25 else "⚠️ thin edge – charges may erase it" if avg >= 0.05
+               else "❌ no real edge")]
 
 
 __all__ = ["build_events", "summarize", "lookup", "format_odds", "evaluate_candidate", "simulate", "score_band"]

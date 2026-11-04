@@ -53,3 +53,10 @@ def test_irrelevant_items_are_dropped(monkeypatch):
     monkeypatch.setattr(news, "_yahoo", lambda s, d, n: [NewsItem("Earnings To Watch: Jyoti CNC", "Y", None)])
     chk = fetch_news("CYIENT", "Cyient Ltd.")
     assert chk.ok and chk.items == [] and "nothing in the last 7 days" in format_news(chk)[0]
+
+
+def test_short_first_word_needs_two_words():
+    from swingbot.news import is_relevant
+
+    assert is_relevant("PTC Industries Q2 profit up 466%", "PTCIL", "PTC Industries Ltd.")
+    assert not is_relevant("PTC India Q2 results await board review", "PTCIL", "PTC Industries Ltd.")

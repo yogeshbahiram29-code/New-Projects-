@@ -570,7 +570,7 @@ def cmd_signals(args, settings) -> int:
                 from .base_rates import load_table, lookup
 
                 table = load_table(Path(settings.get("signals.dir", "journal")) / "base_rates.csv")
-                odds = {r.symbol: lookup(table, r.setup, r.score, regime_on, int(tp.get("odds_min_cases", 30)))
+                odds = {r.symbol: lookup(table, r.setup, r.score, regime_on, int(tp.get("odds_min_cases", 100)))
                         for r in picks.itertuples(index=False)}
             if tp.get("fundamentals", True) and len(picks):
                 from .fundamentals import fetch_fundamentals

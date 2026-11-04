@@ -68,7 +68,10 @@ def format_fundamentals(f: dict | None, sector: str = "") -> list[str]:
         return ["🏢 Fundamentals: not available today (data source busy) - check screener.in / the annual report."]
 
     def pct(x):
-        return f"{x * 100:+.0f}%" if x is not None else "n/a"
+        if x is None:
+            return "n/a"
+        v = round(x * 100)
+        return "0%" if v == 0 else f"{v:+d}%"
 
     mcap = f.get("marketCap")
     de = f.get("debtToEquity")

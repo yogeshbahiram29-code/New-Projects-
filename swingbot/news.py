@@ -122,13 +122,20 @@ def short_name(name: str | None) -> str | None:
 
 def is_relevant(title: str, symbol: str, name: str | None) -> bool:
     """Keep only headlines that mention the company (symbol or first word of its name)."""
-    t = title.lower()
+    def norm(x: str) -> str:  # "Divi's" == "Divis"
+        return x.lower().replace("'", "").replace("’", "")
+
+    t = norm(title)
     keys = {symbol.lower()}
     sn = short_name(name)
     if sn:
-        first = re.split(r"[\s'’]", sn)[0].lower()
-        if len(first) >= 3:
-            keys.add(first)
+        words = [w for w in norm(sn).split() if w]
+        if words and len(words[0]) >= 5:
+            keys.add(words[0])
+        elif len(words) >= 2:  # short first word (e.g. "PTC Industries" vs "PTC India") -> need two words
+            keys.add(f"{words[0]} {words[1]}")
+        elif words and len(words[0]) >= 3:
+            keys.add(words[0])
     return any(re.search(r"\b" + re.escape(k), t) for k in keys)
 
 
