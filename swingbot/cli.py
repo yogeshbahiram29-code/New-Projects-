@@ -504,7 +504,10 @@ def cmd_signals(args, settings) -> int:
             picks = top_swing_picks(raw, index_df, settings, uni, int(tp.get("count", 5)), int(tp.get("max_per_sector", 2)))
             track = record_and_evaluate(picks, raw, index_df, Path(settings.get("signals.dir", "journal")) / "top5_history.csv",
                                         int(tp.get("eval_days", 10)))
-            text = format_picks(picks, track, regime_on, index_df.index[-1], int(tp.get("eval_days", 10)))
+            prof = settings.profile_for(float(settings.get("initial_capital", 10000)))
+            text = format_picks(picks, track, regime_on, index_df.index[-1], int(tp.get("eval_days", 10)),
+                                float(settings.get("risk.max_stop_distance_pct", 8)),
+                                float(settings.get("initial_capital", 10000)), prof.max_position_pct)
             print("\n" + text)
             if not args.no_whatsapp and not notifier.send(text):
                 print(f"ERROR: the {notifier.provider} watchlist message was NOT delivered.")

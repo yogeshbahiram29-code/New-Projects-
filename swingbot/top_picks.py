@@ -107,7 +107,8 @@ def record_and_evaluate(picks: pd.DataFrame, raw: dict[str, pd.DataFrame], index
     return out
 
 
-def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Timestamp, eval_days: int = 10) -> str:
+def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Timestamp, eval_days: int = 10,
+                 max_stop_pct: float = 8.0, capital: float = 10_000, max_position_pct: float = 50.0) -> str:
     L = [f"TOP 5 SWING WATCHLIST - {when:%a %d %b %Y}",
          "⚠️ Learning/paper only: the 2-20 day swing strategy did not beat charges in its backtest.",
          f"Market filter: {'ON' if regime_on else 'OFF - the bot would NOT buy today; watch only'}", ""]
@@ -116,6 +117,13 @@ def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Tim
     for i, r in enumerate(picks.itertuples(index=False), 1):
         L.append(f"{i}) {r.symbol} ({r.sector}) score {r.score:g}/100, strength {r.rs_pct:g}th pct, 6M {r.ret_6m_pct:+.0f}%")
         L.append(f"   ₹{r.close:,.2f} | {r.setup} | watch above ₹{r.trigger:,.2f}, stop ₹{r.stop:,.2f} (-{r.stop_pct}%)")
+        flags = []
+        if r.stop_pct > max_stop_pct:
+            flags.append(f"stop wider than the {max_stop_pct:g}% rule - bot would skip")
+        if r.trigger > capital * max_position_pct / 100:
+            flags.append(f"1 share > ₹{capital * max_position_pct / 100:,.0f} limit for a ₹{capital:,.0f} account")
+        if flags:
+            L.append("   ⚠️ " + "; ".join(flags))
     L.append("")
     if track.get("evaluated"):
         L.append(f"Track record of past lists ({track['evaluated']} picks, {eval_days}-day return): avg {track['avg_pct']:+.2f}% "
