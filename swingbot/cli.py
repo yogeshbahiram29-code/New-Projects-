@@ -559,6 +559,11 @@ def _run_tracker(settings, picks, raw, index_df, regime_on, uni, odds, news, fun
         except Exception as e:  # never let a backfill problem stop the daily message
             print(f"tracker backfill skipped: {e}")
     ledger = record_predictions(ledger, picks, index_df.index[-1], regime_on, odds)
+    from .base_rates import load_table
+    from .tracker import fill_expectations
+
+    ledger = fill_expectations(ledger, load_table(journal / "base_rates.csv"),
+                               int(settings.get("top_picks.odds_min_cases", 100)))
     ledger, changed = update_ledger(ledger, raw, int(tc["horizon"]), float(tc["max_chase_pct"]) / 100)
     save_ledger(ledger, path)
     card = scorecard(ledger, float(tc["cost_pct"]))

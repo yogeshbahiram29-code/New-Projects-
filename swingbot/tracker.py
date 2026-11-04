@@ -164,6 +164,21 @@ def backfill(ledger: pd.DataFrame, hist_path: Path, raw: dict, index_df: pd.Data
     return ledger
 
 
+def fill_expectations(ledger: pd.DataFrame, table: pd.DataFrame | None, min_cases: int = 100) -> pd.DataFrame:
+    """Historical T1-first odds for predictions recorded without them (e.g. rebuilt lists)."""
+    from .base_rates import lookup
+
+    if table is None or ledger.empty:
+        return ledger
+    led = ledger.copy()
+    for i in led.index[pd.to_numeric(led["exp_t1_pct"], errors="coerce").isna()]:
+        o = lookup(table, led.at[i, "setup"], float(led.at[i, "score"]), str(led.at[i, "regime_on"]) == "True",
+                   min_cases)
+        if o:
+            led.at[i, "exp_t1_pct"], led.at[i, "exp_avg_r"] = o["target_first_pct"], o["avg_r"]
+    return led
+
+
 # ---------------------------------------------------------------- scorecard
 def binom_cdf(k: int, n: int, p: float) -> float:
     return float(sum(math.comb(n, i) * p ** i * (1 - p) ** (n - i) for i in range(k + 1)))
@@ -289,13 +304,17 @@ def uncertainty_alerts(ledger: pd.DataFrame, changed: pd.DataFrame, card: dict, 
             A.append(f"🟡 {r.symbol} is close to its stop-loss ({float(r.r):+.1f}R) – make sure the GTT stop is live.")
         if regime_on is False and str(r.regime_on) == "True":
             A.append(f"🟡 Market filter turned OFF after {r.symbol} was predicted – no new entries; don't widen its stop.")
+    results_news = []
     for sym, chk in (news or {}).items():
         if sym in set(active["symbol"]) and chk is not None and chk.ok:
             flags = " ".join(chk.flags)
             if "results" in flags:
-                A.append(f"🟡 {sym} (open): results/board-meeting news – a gap past the stop is possible.")
+                results_news.append(sym)
             if "regulatory" in flags or "rating" in flags:
                 A.append(f"🔴 {sym} (open): legal/rating/promoter news – read it today.")
+    if results_news:
+        A.append(f"🟡 Results/board-meeting news on open predictions: {', '.join(results_news)} – "
+                 "a gap past the stop is possible.")
     closed = led[led["status"].isin(CLOSED)].sort_values("exit_date")
     streak = 0
     for s in reversed(closed["status"].tolist()):
@@ -407,4 +426,4 @@ def load_paper(journal: Path) -> dict | None:
 
 
 __all__ = ["record_predictions", "update_ledger", "track_one", "scorecard", "uncertainty_alerts", "format_tracker",
-           "pick_uncertainty", "format_pick_uncertainty", "backfill", "load_ledger", "save_ledger"]
+           "pick_uncertainty", "format_pick_uncertainty", "backfill", "fill_expectations", "load_ledger", "save_ledger"]

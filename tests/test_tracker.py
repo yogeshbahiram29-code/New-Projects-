@@ -128,7 +128,8 @@ def test_alerts_market_data_and_open_trades():
                            paper=paper, now=datetime(2026, 11, 4, 17, 0))
     t = " ".join(a)
     for part in ("Latest price data is Tue 03 Nov", "No price data for open prediction(s): ZZZ", "gapped below the stop",
-                 "AAA is close to its stop-loss", "Market filter turned OFF after AAA", "results/board-meeting news",
+                 "AAA is close to its stop-loss", "Market filter turned OFF after AAA",
+                 "Results/board-meeting news on open predictions: AAA",
                  "NIFTY moved -2.5%", "India VIX 21.0", "News could not be checked for: QQQ",
                  "delivery % unavailable", "12.0% below its peak"):
         assert part in t, part
@@ -143,3 +144,13 @@ def test_pick_uncertainty_line():
     assert format_pick_uncertainty(r).startswith("🔴 High uncertainty: money flowing out")
     assert pick_uncertainty(None, None, True) == ["too little history for this setup"]
     assert format_pick_uncertainty(pick_uncertainty(None, {"avg_r": 0.1}, True)).startswith("🟡 Uncertainty: thin")
+
+
+def test_fill_expectations_for_rebuilt_rows():
+    from swingbot.tracker import fill_expectations
+
+    table = pd.DataFrame([{"setup": "breakout", "band": "all", "regime": "on", "cases": 500, "target_first_pct": 24.0,
+                           "avg_r": 0.07}])
+    led = record_predictions(load_ledger(__import__("pathlib").Path("/nonexistent")), _picks("AAA"), "2026-11-02", True)
+    out = fill_expectations(led, table)
+    assert out.iloc[0]["exp_t1_pct"] == 24.0 and fill_expectations(led, None) is led
