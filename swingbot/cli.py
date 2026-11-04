@@ -489,6 +489,26 @@ def cmd_signals(args, settings) -> int:
         if tracker.sent_ok is False:
             print(f"ERROR: the {notifier.provider} alert was NOT delivered (see warnings above).")
             return 3
+        if settings.get("top_picks.enabled", True):
+            from .data import load_full_universe
+            from .top_picks import format_picks, record_and_evaluate, top_swing_picks
+
+            uni = load_full_universe(settings)
+            bench = settings.get("regime.benchmark", "NIFTY50")
+            raw = loader.load(sorted(uni) + [bench], int(settings.get("data.history_days", 600)))
+            index_df = raw.pop(bench)
+            ic = index_df["close"]
+            m = ic.rolling(200).mean()
+            regime_on = bool(ic.iloc[-1] > m.iloc[-1] and m.iloc[-1] > m.iloc[-21])
+            tp = settings.section("top_picks")
+            picks = top_swing_picks(raw, index_df, settings, uni, int(tp.get("count", 5)), int(tp.get("max_per_sector", 2)))
+            track = record_and_evaluate(picks, raw, index_df, Path(settings.get("signals.dir", "journal")) / "top5_history.csv",
+                                        int(tp.get("eval_days", 10)))
+            text = format_picks(picks, track, regime_on, index_df.index[-1], int(tp.get("eval_days", 10)))
+            print("\n" + text)
+            if not args.no_whatsapp and not notifier.send(text):
+                print(f"ERROR: the {notifier.provider} watchlist message was NOT delivered.")
+                return 3
         return 0
 
     desk = _desk(settings, need_data=True)

@@ -48,6 +48,10 @@ So B is **not validated for real money**.
 
 The first review is after 3 months. If B beats NIFTY without breaching the 20% drawdown limit, we can discuss real money. Otherwise we stop.
 
+**Second daily message: "Top 5 swing watchlist" (learning/paper only).** It lists the 5 highest-scoring liquid uptrend stocks, with at most 2 per sector, and gives watch-above and stop levels for each. Every list is saved in `journal/top5_history.csv`. After 10 trading days the bot reports how those picks actually did against NIFTY, so you can judge the list on real evidence.
+
+To get a deep dive on any stock: GitHub → Actions → **Analyze stock** → type the NSE symbol(s). The report arrives on Telegram.
+
 To run your own research: GitHub → Actions → **Research** (`kind: portfolio` or `swing`). For each test it reports:
 - top trades
 - year-by-year returns

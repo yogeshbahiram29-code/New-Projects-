@@ -59,3 +59,24 @@ def test_stock_report_runs_and_handles_unknown_symbol():
     rep = analyze_stock("STOCK05", stocks, idx, s, sectors)
     assert "BOT SCORE" in rep and "VERDICT" in rep and "Not investment advice" in rep
     assert "no price data" in analyze_stock("NOPE", stocks, idx, s, sectors)
+
+
+def test_top_picks_respect_count_sector_cap_and_track_record(tmp_path):
+    from swingbot.config import load_settings
+    from swingbot.top_picks import format_picks, record_and_evaluate, top_swing_picks
+
+    stocks, idx, sectors = make_market(n_stocks=40, years=3, seed=6)
+    s = load_settings(overrides={"universe": {"min_avg_traded_value_cr": 0}})
+    hist = tmp_path / "top5.csv"
+    track = {}
+    for d in idx.index[-40::5]:  # several daily lists, then enough days pass to score them
+        cut = {k: v.loc[:d] for k, v in stocks.items()}
+        picks = top_swing_picks(cut, idx.loc[:d], s, sectors, n=5, max_per_sector=2)
+        assert len(picks) <= 5
+        if len(picks):
+            assert picks["sector"].value_counts().max() <= 2
+            assert (picks["stop"] < picks["trigger"]).all()
+        track = record_and_evaluate(picks, cut, idx.loc[:d], hist, eval_days=10)
+    assert track["lists"] >= 2 and track["evaluated"] > 0
+    text = format_picks(picks, track, True, idx.index[-1])
+    assert text.startswith("TOP 5 SWING WATCHLIST") and "Learning/paper only" in text

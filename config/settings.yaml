@@ -211,6 +211,15 @@ rotation:
   drawdown_alert_pct: 20    # forward-test risk limit
   review_after_months: 3    # first review of the paper results
 
+# ---------------------------------------------------------------------
+# Daily "Top 5 swing watchlist" (learning/paper only) + its forward track record
+# ---------------------------------------------------------------------
+top_picks:
+  enabled: true
+  count: 5
+  max_per_sector: 2         # diversification: at most 2 picks from one sector
+  eval_days: 10             # each list is scored on its next-10-trading-day return vs NIFTY
+
 notifications:
   whatsapp_provider: callmebot    # callmebot | meta | none
   daily_report: true
