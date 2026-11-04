@@ -273,7 +273,16 @@ def cmd_analyze(args, settings) -> int:
     cache = CachedData(make_provider(settings), settings.get("data.cache_dir", "data_cache"))
     raw = cache.load(syms + [bench], int(settings.get("data.history_days", 600)))
     index_df = raw.pop(bench)
-    reports = [analyze_stock(sym, raw, index_df, settings, uni) for sym in args.symbols]
+    from .data import load_names
+    from .news import fetch_news, format_news
+
+    names = load_names(settings)
+    reports = []
+    for sym in args.symbols:
+        rep = analyze_stock(sym, raw, index_df, settings, uni)
+        if sym.upper() in raw:
+            rep += "\n\n" + "\n".join(format_news(fetch_news(sym.upper(), names.get(sym.upper())), indent=""))
+        reports.append(rep)
     text = "\n\n".join(reports)
     print(text)
     if args.send:
@@ -505,9 +514,16 @@ def cmd_signals(args, settings) -> int:
             track = record_and_evaluate(picks, raw, index_df, Path(settings.get("signals.dir", "journal")) / "top5_history.csv",
                                         int(tp.get("eval_days", 10)))
             prof = settings.profile_for(float(settings.get("initial_capital", 10000)))
+            news = {}
+            if tp.get("news", True) and len(picks):
+                from .data import load_names
+                from .news import fetch_news
+
+                names = load_names(settings)
+                news = {sym: fetch_news(sym, names.get(sym)) for sym in picks["symbol"]}
             text = format_picks(picks, track, regime_on, index_df.index[-1], int(tp.get("eval_days", 10)),
                                 float(settings.get("risk.max_stop_distance_pct", 8)),
-                                float(settings.get("initial_capital", 10000)), prof.max_position_pct)
+                                float(settings.get("initial_capital", 10000)), prof.max_position_pct, news)
             print("\n" + text)
             if not args.no_whatsapp and not notifier.send(text):
                 print(f"ERROR: the {notifier.provider} watchlist message was NOT delivered.")

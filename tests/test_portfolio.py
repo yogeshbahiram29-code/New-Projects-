@@ -79,8 +79,12 @@ def test_top_picks_respect_count_sector_cap_and_track_record(tmp_path):
         track = record_and_evaluate(picks, cut, idx.loc[:d], hist, eval_days=10)
     assert track["lists"] >= 2 and track["evaluated"] > 0
     text = format_picks(picks, track, True, idx.index[-1])
-    assert text.startswith("TOP 5 SWING WATCHLIST") and "Learning/paper only" in text
+    assert text.startswith("📊 TOP 5 SWING WATCHLIST") and "Paper/learning only" in text
+    assert "🎯 Target 1" in text or picks.empty
+    if len(picks):
+        assert (picks["stop"] < picks["trigger"]).all() and (picks["trigger"] < picks["t1"]).all() and (picks["t1"] <= picks["t2"]).all()
     wide = pd.DataFrame([{"symbol": "X", "sector": "S", "score": 80.0, "rs_pct": 90.0, "close": 9000.0, "ret_6m_pct": 50.0,
-                          "setup": "breakout", "trigger": 9010.0, "stop": 8000.0, "stop_pct": 11.2}])
+                          "setup": "breakout", "trigger": 9010.0, "stop": 8000.0, "stop_pct": 11.2,
+                          "t1": 11030.0, "t1_pct": 22.4, "t2": 12040.0, "t2_pct": 33.6}])
     flagged = format_picks(wide, {}, True, idx.index[-1])
     assert "stop wider than the 8% rule" in flagged and "1 share >" in flagged

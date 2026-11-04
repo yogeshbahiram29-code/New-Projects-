@@ -224,6 +224,19 @@ def load_universe(path: str | Path) -> dict[str, str]:
     return out
 
 
+def load_names(settings) -> dict[str, str]:
+    """symbol -> company name (from the NIFTY 500 file), used for news search."""
+    out = {}
+    for key in ("universe.file", "universe.extra_file"):
+        p = settings.get(key)
+        if p and Path(p).exists():
+            with open(p, encoding="utf-8") as fh:
+                for row in csv.DictReader(fh):
+                    if row.get("symbol") and row.get("name"):
+                        out[row["symbol"].strip()] = row["name"].strip()
+    return out
+
+
 def load_full_universe(settings) -> dict[str, str]:
     """Main universe file plus the 'fallen stocks' extra file (reduces survivorship bias)."""
     uni = load_universe(settings.get("universe.file", "config/universe.csv"))
@@ -259,9 +272,9 @@ def download_nifty500(dest: str | Path) -> int:
         raise DataError("could not download the NIFTY 500 list: " + "; ".join(errors))
     with open(dest, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
-        w.writerow(["symbol", "sector"])
+        w.writerow(["symbol", "sector", "name"])
         for row in rows:
-            w.writerow([row["Symbol"].strip(), row.get("Industry", "UNKNOWN").strip()])
+            w.writerow([row["Symbol"].strip(), row.get("Industry", "UNKNOWN").strip(), (row.get("Company Name") or "").strip()])
     return len(rows)
 
 

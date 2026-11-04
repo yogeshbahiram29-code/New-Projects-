@@ -219,6 +219,7 @@ top_picks:
   count: 5
   max_per_sector: 2         # diversification: at most 2 picks from one sector
   eval_days: 10             # each list is scored on its next-10-trading-day return vs NIFTY
+  news: true                # show the latest 7-day headlines + risk flags for each pick
 
 notifications:
   whatsapp_provider: callmebot    # callmebot | meta | none

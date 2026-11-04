@@ -47,15 +47,22 @@ def top_swing_picks(raw: dict[str, pd.DataFrame], index_df: pd.DataFrame, settin
         atr = float(row["atr14"])
         if found:
             trigger, stop, setup = found.plan.trigger_price, found.plan.stop_price, found.plan.setup.value
+            resistance = found.plan.target_price
         else:
             trigger = round(float(row["high"]) * 1.001, 2)
-            stop, setup = round(trigger - 2 * atr, 2), "no setup yet (wait for pullback/breakout)"
+            stop, setup = round(trigger - 2 * atr, 2), "no setup yet"
+            resistance = None
+        risk = trigger - stop
+        t1 = round(trigger + 2 * risk, 2)  # target 1 = 2x the risk (the bot's minimum reward:risk)
+        t2 = round(max(resistance or 0, trigger + 3 * risk), 2)  # target 2 = resistance or 3x the risk
         rows.append({
             "symbol": sym, "sector": (sectors or {}).get(sym, "UNKNOWN"), "score": card.total,
             "rs_pct": round(float(rs), 0) if not pd.isna(rs) else np.nan, "close": round(float(row["close"]), 2),
             "ret_6m_pct": round(float(row["ret_126"]) * 100, 1) if not pd.isna(row.get("ret_126")) else np.nan,
             "setup": setup, "trigger": trigger, "stop": stop,
             "stop_pct": round((trigger - stop) / trigger * 100, 1),
+            "t1": t1, "t1_pct": round((t1 / trigger - 1) * 100, 1),
+            "t2": t2, "t2_pct": round((t2 / trigger - 1) * 100, 1),
         })
     if not rows:
         return pd.DataFrame()
@@ -108,15 +115,25 @@ def record_and_evaluate(picks: pd.DataFrame, raw: dict[str, pd.DataFrame], index
 
 
 def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Timestamp, eval_days: int = 10,
-                 max_stop_pct: float = 8.0, capital: float = 10_000, max_position_pct: float = 50.0) -> str:
-    L = [f"TOP 5 SWING WATCHLIST - {when:%a %d %b %Y}",
-         "⚠️ Learning/paper only: the 2-20 day swing strategy did not beat charges in its backtest.",
-         f"Market filter: {'ON' if regime_on else 'OFF - the bot would NOT buy today; watch only'}", ""]
+                 max_stop_pct: float = 8.0, capital: float = 10_000, max_position_pct: float = 50.0,
+                 news: dict | None = None) -> str:
+    from .news import format_news
+
+    num = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    L = [f"📊 TOP 5 SWING WATCHLIST · {when:%a %d %b %Y}",
+         ("🟢 Market: UPTREND - setups allowed (paper)" if regime_on
+          else "🔴 Market: DOWNTREND - watch only, don't buy today"),
+         "🧪 Paper/learning only - not validated for real money", ""]
     if picks.empty:
-        L.append("No stock passes the trend filters today (price above a rising 200-day average). Cash is a position.")
-    for i, r in enumerate(picks.itertuples(index=False), 1):
-        L.append(f"{i}) {r.symbol} ({r.sector}) score {r.score:g}/100, strength {r.rs_pct:g}th pct, 6M {r.ret_6m_pct:+.0f}%")
-        L.append(f"   ₹{r.close:,.2f} | {r.setup} | watch above ₹{r.trigger:,.2f}, stop ₹{r.stop:,.2f} (-{r.stop_pct}%)")
+        L.append("No stock passes the trend filters today. Cash is a position. 💤")
+    for i, r in enumerate(picks.itertuples(index=False)):
+        tag = num[i] if i < len(num) else f"{i + 1})"
+        L.append(f"{tag} {r.symbol} · {r.sector}")
+        L.append(f"   ⭐ Score {r.score:.0f}/100 · strength {r.rs_pct:.0f}th pct · 6M {r.ret_6m_pct:+.0f}%")
+        L.append(f"   💰 Price ₹{r.close:,.2f} · setup: {r.setup}")
+        L.append(f"   🟢 Buy above ₹{r.trigger:,.2f}")
+        L.append(f"   🔴 Stop-loss ₹{r.stop:,.2f} (-{r.stop_pct}%)")
+        L.append(f"   🎯 Target 1 ₹{r.t1:,.2f} (+{r.t1_pct}%) · Target 2 ₹{r.t2:,.2f} (+{r.t2_pct}%)")
         flags = []
         if r.stop_pct > max_stop_pct:
             flags.append(f"stop wider than the {max_stop_pct:g}% rule - bot would skip")
@@ -124,13 +141,16 @@ def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Tim
             flags.append(f"1 share > ₹{capital * max_position_pct / 100:,.0f} limit for a ₹{capital:,.0f} account")
         if flags:
             L.append("   ⚠️ " + "; ".join(flags))
-    L.append("")
+        if news and r.symbol in news:
+            L += format_news(news[r.symbol])
+        L.append("")
     if track.get("evaluated"):
-        L.append(f"Track record of past lists ({track['evaluated']} picks, {eval_days}-day return): avg {track['avg_pct']:+.2f}% "
-                 f"vs NIFTY {track['nifty_avg_pct']:+.2f}% | {track['positive_pct']:.0f}% positive, "
+        L.append(f"📈 Report card ({track['evaluated']} past picks, {eval_days}-day return): avg {track['avg_pct']:+.2f}% "
+                 f"vs NIFTY {track['nifty_avg_pct']:+.2f}% · {track['positive_pct']:.0f}% up · "
                  f"{track['beat_nifty_pct']:.0f}% beat NIFTY")
     else:
-        L.append(f"Track record: starts after the first lists are {eval_days} trading days old "
-                 f"({track.get('lists', 0)} list(s) saved so far).")
-    L.append("Deep dive on any name: GitHub -> Actions -> Analyze stock.")
+        L.append(f"📈 Report card: starts once the first lists are {eval_days} trading days old "
+                 f"({track.get('lists', 0)} saved so far)")
+    L.append("✅ Before any decision: read the news, check results dates, never skip the stop-loss.")
+    L.append("🔎 Deep dive: GitHub → Actions → Analyze stock")
     return "\n".join(L)

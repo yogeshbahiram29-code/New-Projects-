@@ -117,15 +117,16 @@ class Notifier:
         return False
 
     def send(self, text: str, urgent: bool = False) -> bool:
-        prefix = "🚨 " if urgent else ""
-        text = f"{prefix}SwingBot: {text}"
+        prefix = "🚨 SwingBot ALERT: " if urgent else "🤖 "
+        text = f"{prefix}{text}"
         with open(self.log_path, "a", encoding="utf-8") as fh:
             fh.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {text}\n")
         log.info(text)
         if self.provider == "none":
             return True
         ok = True
-        for part in _split(text):
+        limit = 3800 if self.provider == "telegram" else MAX_LEN  # Telegram allows 4096 chars per message
+        for part in _split(text, limit):
             ok &= self._send_one(part)
         return ok
 
@@ -178,12 +179,12 @@ class Notifier:
         return False
 
 
-def _split(text: str) -> list[str]:
-    if len(text) <= MAX_LEN:
+def _split(text: str, limit: int = MAX_LEN) -> list[str]:
+    if len(text) <= limit:
         return [text]
     parts, cur = [], ""
     for line in text.splitlines(keepends=True):
-        if len(cur) + len(line) > MAX_LEN and cur:
+        if len(cur) + len(line) > limit and cur:
             parts.append(cur)
             cur = ""
         cur += line

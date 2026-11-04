@@ -37,6 +37,8 @@ jobs:
           path: data_cache
           key: prices-${{ github.run_id }}
           restore-keys: prices-
+      - name: Refresh NIFTY 500 list (names are used for the news check)
+        run: python -m swingbot update-universe || echo "NIFTY 500 download failed - keeping the saved list"
       - name: Analyse market and send WhatsApp signals
         env:
           # repository secrets preferred; repository variables accepted as a fallback
@@ -53,6 +55,6 @@ jobs:
         run: |
           git config user.name "swingbot"
           git config user.email "swingbot@users.noreply.github.com"
-          git add journal/
+          git add journal/ config/universe.csv
           git diff --cached --quiet || git commit -m "journal: signals $(date -u +%F)"
           git push
