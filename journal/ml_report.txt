@@ -1,0 +1,32 @@
+🧠 MACHINE-LEARNING TEST (out-of-sample)
+
+📚 Trained on: Jan 2015 – Nov 2022 (11,202 trades)
+🧪 Tested on: Jan 2023 – Nov 2026 (10,455 trades it never saw)
+💸 Costs: 0.55% per round trip, converted to R
+
+━━━━━━━━━━━━━━━━━━
+📊 All test trades: avg +0.02R after costs · T1 first 24%
+🔢 Bot score ranking: AUC 0.541 · top-20% +0.02R · daily top-5 +0.03R (2,299 trades)
+
+🤖 Logistic regression
+   AUC 0.577 (train 0.623) · top-20% +0.01R (T1 first 32%) · daily top-5 +0.01R (2,266 trades)
+   By year (model AUC / score AUC): 2023 0.56/0.52, 2024 0.56/0.55, 2025 0.58/0.52, 2026 0.55/0.58
+   Calibration (predicted → actual T1-first %, low→high): 13→18, 18→21, 21→24, 24→27, 30→32
+   Biggest drivers: distance from 200-day avg (+), stop distance (−), liquidity (−), market filter ON (−), 6-month return (−)
+   Rules: ✅ AUC ≥ 0.55 · ❌ top-20% beats score by ≥ +0.10R · ✅ top-20% profitable after costs · ❌ daily top-5 beats score
+   ➡️ ❌ NOT ADOPTED
+
+🤖 Gradient boosting
+   AUC 0.583 (train 0.685) · top-20% +0.05R (T1 first 32%) · daily top-5 -0.00R (2,224 trades)
+   By year (model AUC / score AUC): 2023 0.56/0.52, 2024 0.56/0.55, 2025 0.57/0.52, 2026 0.57/0.58
+   Calibration (predicted → actual T1-first %, low→high): 13→16, 18→22, 21→24, 24→26, 31→32
+   Rules: ✅ AUC ≥ 0.55 · ❌ top-20% beats score by ≥ +0.10R · ✅ top-20% profitable after costs · ❌ daily top-5 beats score
+   ➡️ ❌ NOT ADOPTED
+
+━━━━━━━━━━━━━━━━━━
+🧭 WHAT IT MEANS
+• ML did not reliably beat the simple score on unseen years, so the bot keeps the simple score.
+• The model sees a weak pattern, but not enough to beat the score after costs.
+• Past results are not a promise. Risk management stays the main edge.
+
+📊 Discipline First | Capital Protection Always.
