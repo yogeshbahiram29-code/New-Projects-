@@ -543,6 +543,42 @@ def _desk(settings, need_data: bool = False):
     return SignalDesk(settings, loader, notifier)
 
 
+def _run_tracker(settings, picks, raw, index_df, regime_on, uni, odds, news, funda, volume, delivery_ok,
+                 odds_missing, extra) -> str:
+    """Check every past prediction against real prices and collect uncertainty alerts."""
+    from .tracker import (backfill, cfg, format_tracker, load_ledger, load_paper, record_predictions, save_ledger,
+                          scorecard, uncertainty_alerts, update_ledger)
+
+    journal = Path(settings.get("signals.dir", "journal"))
+    tc = cfg(settings)
+    path = journal / "predictions.csv"
+    ledger = load_ledger(path)
+    if ledger.empty:  # first run: rebuild the levels of watchlists sent before the tracker existed
+        try:
+            ledger = backfill(ledger, journal / "top5_history.csv", raw, index_df, settings, uni)
+        except Exception as e:  # never let a backfill problem stop the daily message
+            print(f"tracker backfill skipped: {e}")
+    ledger = record_predictions(ledger, picks, index_df.index[-1], regime_on, odds)
+    ledger, changed = update_ledger(ledger, raw, int(tc["horizon"]), float(tc["max_chase_pct"]) / 100)
+    save_ledger(ledger, path)
+    card = scorecard(ledger, float(tc["cost_pct"]))
+    news = dict(news or {})
+    open_syms = [s for s in ledger.loc[ledger["status"] == "ACTIVE", "symbol"] if s not in news]
+    if open_syms and settings.get("top_picks.news", True):
+        from .data import load_names
+        from .news import fetch_news
+
+        names = load_names(settings)
+        news.update({s: fetch_news(s, names.get(s)) for s in open_syms})
+    sources = {"news_failed": [s for s, c in news.items() if c is not None and not c.ok],
+               "delivery_ok": delivery_ok if volume is not None else None,
+               "funda_missing": [s for s, f in (funda or {}).items() if not f], "odds_missing": odds_missing}
+    paper = load_paper(journal)
+    alerts = uncertainty_alerts(ledger, changed, card, tc, index_df=index_df, regime_on=regime_on, extra=extra,
+                                raw=raw, sources=sources, news=news, paper=paper)
+    return format_tracker(ledger, changed, card, alerts, index_df.index[-1], paper, int(tc["horizon"]))
+
+
 def cmd_signals(args, settings) -> int:
     from .data import DataError
     from .signals import SignalError
@@ -563,6 +599,7 @@ def cmd_signals(args, settings) -> int:
             print(f"ERROR: {e}")
             return 1
         messages = [paper_msg]
+        extra: dict = {}
         if settings.get("dashboard.enabled", True):
             from .dashboard import market_dashboard
             from .data import load_full_universe
@@ -599,7 +636,7 @@ def cmd_signals(args, settings) -> int:
             track = record_and_evaluate(picks, raw, index_df, Path(settings.get("signals.dir", "journal")) / "top5_history.csv",
                                         int(tp.get("eval_days", 10)))
             prof = settings.profile_for(float(settings.get("initial_capital", 10000)))
-            news, odds, funda = {}, None, None
+            news, odds, funda, odds_missing = {}, None, None, False
             if tp.get("news", True) and len(picks):
                 from .data import load_names
                 from .news import fetch_news
@@ -610,6 +647,7 @@ def cmd_signals(args, settings) -> int:
                 from .base_rates import load_table, lookup
 
                 table = load_table(Path(settings.get("signals.dir", "journal")) / "base_rates.csv")
+                odds_missing = table is None
                 odds = {r.symbol: lookup(table, r.setup, r.score, regime_on, int(tp.get("odds_min_cases", 100)))
                         for r in picks.itertuples(index=False)}
             if tp.get("fundamentals", True) and len(picks):
@@ -635,6 +673,21 @@ def cmd_signals(args, settings) -> int:
             if not args.no_whatsapp and not notifier.send(text):
                 print(f"ERROR: the {notifier.provider} watchlist message was NOT delivered.")
                 return 3
+            if settings.get("tracker.enabled", True):
+                try:
+                    track_msg = _run_tracker(settings, picks, raw, index_df, regime_on, uni, odds, news, funda,
+                                             volume, delivery_ok, odds_missing, extra)
+                except Exception as e:  # a tracker bug must never hide silently
+                    import traceback
+
+                    traceback.print_exc()
+                    track_msg = (f"🔍 PREDICTION TRACKER\n🔴 UNCERTAINTY ALERT: the tracker failed today ({type(e).__name__}: "
+                                 f"{str(e)[:150]}).\nPast predictions were NOT checked – treat today's watchlist with "
+                                 "extra caution.")
+                print("\n" + track_msg)
+                if not args.no_whatsapp and not notifier.send(track_msg):
+                    print(f"ERROR: the {notifier.provider} prediction-tracker message was NOT delivered.")
+                    return 3
         return 0
 
     desk = _desk(settings, need_data=True)

@@ -149,6 +149,7 @@ def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Tim
                  volume: dict | None = None, delivery_ok: bool = True) -> str:
     from .base_rates import format_odds
     from .fundamentals import format_fundamentals
+    from .tracker import format_pick_uncertainty, pick_uncertainty
     from .volume_quality import format_volume
 
     num = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
@@ -187,6 +188,10 @@ def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Tim
         if fundamentals is not None:
             L += format_fundamentals(fundamentals.get(r.symbol), r.sector)
         L += _news_line((news or {}).get(r.symbol))
+        v = (volume or {}).get(r.symbol) or {}
+        L.append(format_pick_uncertainty(pick_uncertainty(
+            v.get("profile"), (odds or {}).get(r.symbol), odds is not None, (fundamentals or {}).get(r.symbol),
+            fundamentals is not None, r.sector, (news or {}).get(r.symbol))))
         L.append("")
     L += [LINE, "📊 REPORT CARD"]
     if track.get("evaluated"):

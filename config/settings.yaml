@@ -225,6 +225,20 @@ top_picks:
   fundamentals: true        # market cap, P/E, ROE, debt, profit growth + flags
   volume: true              # volume quality: accumulation/distribution + NSE delivery % (best effort)
 
+tracker:                    # checks EVERY watchlist prediction each session (journal/predictions.csv)
+  enabled: true
+  horizon: 20               # sessions before an open prediction times out
+  max_chase_pct: 2          # opening further above the entry than this = missed (no chasing)
+  near_stop_r: -0.7         # alert when an open prediction is this close to its stop
+  losing_streak: 4          # alert after this many stop-outs in a row
+  drift_min_closed: 10      # closed predictions needed before comparing with history
+  drift_p: 0.05             # alert if results are this unlikely to be bad luck alone
+  vix_high: 20              # India VIX level that counts as high volatility
+  vix_jump_pct: 15          # one-day VIX jump that triggers an alert
+  nifty_move_pct: 2         # one-day NIFTY move that triggers an alert
+  paper_dd_warn_pct: 10     # early warning before Option B's 20% drawdown limit
+  cost_pct: 0.55            # round-trip charges + slippage, % of position (for "after charges")
+
 dashboard:
   enabled: true             # daily market dashboard (trend, breadth, VIX, sectors, global cues)
 

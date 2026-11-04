@@ -77,6 +77,20 @@ To get a deep dive on any stock: GitHub → Actions → **Analyze stock** → ty
    - 🎲 **historical odds:** how often similar past setups (same type, score band and market trend, NIFTY 500 since 2015) hit Target 1 before the stop
    - 🏢 **fundamentals:** market cap, P/E, ROE, D/E, profit growth, with flags
    - 📰 **news**
+   - 🟡/🔴 **uncertainty line:** lists every conflicting signal for the pick: money flowing out, no historical edge, a fundamental red flag, results or legal news, or a data source that couldn't be checked. A pick with no conflicts gets "✅ Confidence check", which is still not a guarantee.
+4. 🔍 **Prediction tracker.** Every watchlist pick is a prediction: "if it trades above the entry, Target 1 comes before the stop". **Every session** the bot re-checks *every* past prediction against the real candles, using the same rules as the odds table:
+   - statuses: waiting, not triggered, active, ✅ worked, ❌ failed (stop), ⏳ time-out after 20 sessions
+   - a stock picked again while its earlier prediction is still open is not counted twice
+   - the message shows today's changes, the open predictions with their current R, and a scorecard of hit rate and average R before and after charges, compared with what history predicted
+   - everything is saved in `journal/predictions.csv`
+
+   It starts with **🚨 UNCERTAINTY ALERTS** whenever something makes the predictions less trustworthy:
+   - **Data:** stale or missing price data; news, delivery %, fundamentals or the odds table unavailable
+   - **Open predictions:** a stop hit by a gap, a prediction near its stop, results or legal news on an open prediction, the market filter turning OFF
+   - **Results so far:** 4+ stop-outs in a row; results statistically worse than history; a hit rate above 75%, which is too good to trust and points to bad data
+   - **Market:** India VIX high or jumping, NIFTY moving ±2% in a day, the Option B paper drawdown passing 10%
+
+   If the tracker itself ever fails, you get a 🔴 alert instead of silence.
 
 **Mistake tracker.** Record every real trade with **Actions → Record trade** and fill in the optional *reason*, *emotion* and *followed plan* boxes. The bot checks the trade against its own rules and replies on Telegram with "📒 TRADE RECORDED" and a mistake check:
 - **Buy checks:** off-plan stock, market filter OFF, chased above the entry, bought before the trigger, no stop or too-wide stop, risk above 1%, oversized position, revenge trade, overtrading, emotional entry
@@ -405,5 +419,5 @@ journalctl -u swingbot -f
 ## Tests
 
 ```bash
-pytest -q        # 84 tests: risk rules, exits, costs, setups, backtester, engine, signal mode, odds, volume, mistakes, ML
+pytest -q        # 91 tests: risk rules, exits, costs, setups, backtester, engine, signal mode, odds, volume, mistakes, ML, prediction tracker
 ```
