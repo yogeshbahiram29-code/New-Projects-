@@ -60,7 +60,9 @@ def is_fresh(df: pd.DataFrame, expected_last: date) -> bool:
 # ---------------------------------------------------------------------------
 class YFinanceProvider:
     name = "yfinance"
-    index_tickers = {"NIFTY50": "^NSEI", "NIFTY500": "^CRSLDX", "INDIAVIX": "^INDIAVIX"}
+    index_tickers = {"NIFTY50": "^NSEI", "NIFTY500": "^CRSLDX", "INDIAVIX": "^INDIAVIX", "BANKNIFTY": "^NSEBANK",
+                     "SP500": "^GSPC", "NASDAQ": "^IXIC", "BRENT": "BZ=F", "USDINR": "INR=X", "GOLD": "GC=F",
+                     "US10Y": "^TNX"}
 
     def __init__(self):
         try:

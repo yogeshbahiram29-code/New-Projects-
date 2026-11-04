@@ -281,6 +281,9 @@ def cmd_analyze(args, settings) -> int:
     for sym in args.symbols:
         rep = analyze_stock(sym, raw, index_df, settings, uni)
         if sym.upper() in raw:
+            from .fundamentals import fetch_fundamentals, format_fundamentals
+
+            rep += "\n\n" + "\n".join(format_fundamentals(fetch_fundamentals(sym.upper()), uni.get(sym.upper(), "")))
             rep += "\n\n" + "\n".join(format_news(fetch_news(sym.upper(), names.get(sym.upper())), indent=""))
         reports.append(rep)
     text = "\n\n".join(reports)
@@ -292,6 +295,30 @@ def cmd_analyze(args, settings) -> int:
             if not n.send(r):
                 print(f"ERROR: the {n.provider} message was NOT delivered.")
                 return 3
+    return 0
+
+
+def cmd_base_rates(args, settings) -> int:
+    """Build the historical-odds table used by the watchlist (journal/base_rates.csv)."""
+    from .base_rates import build_events, summarize
+    from .data import CachedData, load_full_universe, make_provider
+
+    uni = load_full_universe(settings)
+    bench = settings.get("regime.benchmark", "NIFTY50")
+    end = pd.Timestamp(args.end).date() if args.end else date.today()
+    days = (pd.Timestamp(end) - pd.Timestamp(args.start)).days + 600
+    cache = CachedData(make_provider(settings), settings.get("data.cache_dir", "data_cache"))
+    raw = cache.load(sorted(uni) + [bench], int(days / 1.5) + 1, end)
+    index_df = raw.pop(bench)
+    print(f"Building historical odds: {len(raw)} stocks, {args.start} -> {end}, horizon {args.horizon} days")
+    events = build_events(raw, index_df, settings, args.start, None, args.horizon, progress=True)
+    table = summarize(events)
+    out = Path(settings.get("signals.dir", "journal")) / "base_rates.csv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    table.to_csv(out, index=False)
+    pd.set_option("display.width", 200)
+    print(f"\n{len(events):,} cases -> {out}\n")
+    print(table[table["band"] == "all"].to_string(index=False))
     return 0
 
 
@@ -491,13 +518,31 @@ def cmd_signals(args, settings) -> int:
                             store_path=Path(settings.get("signals.dir", "journal")) / "telegram.json")
         tracker = RotationPaperTracker(settings, loader, notifier)
         try:
-            print(tracker.run(send=not args.no_whatsapp))
+            paper_msg = tracker.run(send=False)
         except (DataError, RuntimeError) as e:
             print(f"ERROR: {e}")
             return 1
-        if tracker.sent_ok is False:
-            print(f"ERROR: the {notifier.provider} alert was NOT delivered (see warnings above).")
-            return 3
+        messages = [paper_msg]
+        if settings.get("dashboard.enabled", True):
+            from .dashboard import market_dashboard
+            from .data import load_full_universe
+
+            uni_d = load_full_universe(settings)
+            bench_d = settings.get("regime.benchmark", "NIFTY50")
+            raw_d = loader.load(sorted(uni_d) + [bench_d], int(settings.get("data.history_days", 600)))
+            idx_d = raw_d.pop(bench_d)
+            extra_keys = ["INDIAVIX", "BANKNIFTY", "SP500", "NASDAQ", "BRENT", "USDINR", "GOLD", "US10Y"]
+            try:
+                extra = loader.load(extra_keys, 120)
+            except Exception as e:  # global data is a nice-to-have
+                print(f"global market data unavailable: {e}")
+                extra = {}
+            messages.insert(0, market_dashboard(raw_d, idx_d, uni_d, extra))
+        for msg in messages:
+            print(msg + "\n")
+            if not args.no_whatsapp and not notifier.send(msg):
+                print(f"ERROR: the {notifier.provider} alert was NOT delivered (see warnings above).")
+                return 3
         if settings.get("top_picks.enabled", True):
             from .data import load_full_universe
             from .top_picks import format_picks, record_and_evaluate, top_swing_picks
@@ -514,16 +559,26 @@ def cmd_signals(args, settings) -> int:
             track = record_and_evaluate(picks, raw, index_df, Path(settings.get("signals.dir", "journal")) / "top5_history.csv",
                                         int(tp.get("eval_days", 10)))
             prof = settings.profile_for(float(settings.get("initial_capital", 10000)))
-            news = {}
+            news, odds, funda = {}, None, None
             if tp.get("news", True) and len(picks):
                 from .data import load_names
                 from .news import fetch_news
 
                 names = load_names(settings)
                 news = {sym: fetch_news(sym, names.get(sym)) for sym in picks["symbol"]}
+            if tp.get("odds", True) and len(picks):
+                from .base_rates import load_table, lookup
+
+                table = load_table(Path(settings.get("signals.dir", "journal")) / "base_rates.csv")
+                odds = {r.symbol: lookup(table, r.setup, r.score, regime_on, int(tp.get("odds_min_cases", 30)))
+                        for r in picks.itertuples(index=False)}
+            if tp.get("fundamentals", True) and len(picks):
+                from .fundamentals import fetch_fundamentals
+
+                funda = {sym: fetch_fundamentals(sym) for sym in picks["symbol"]}
             text = format_picks(picks, track, regime_on, index_df.index[-1], int(tp.get("eval_days", 10)),
                                 float(settings.get("risk.max_stop_distance_pct", 8)),
-                                float(settings.get("initial_capital", 10000)), prof.max_position_pct, news)
+                                float(settings.get("initial_capital", 10000)), prof.max_position_pct, news, odds, funda)
             print("\n" + text)
             if not args.no_whatsapp and not notifier.send(text):
                 print(f"ERROR: the {notifier.provider} watchlist message was NOT delivered.")
@@ -626,6 +681,10 @@ def main(argv: list[str] | None = None) -> int:
     an = sub.add_parser("analyze", help="technical analysis of one or more stocks, e.g. analyze VMM")
     an.add_argument("symbols", nargs="+", help="NSE symbols, e.g. VMM (Vishal Mega Mart)")
     an.add_argument("--send", action="store_true", help="also send the report to Telegram/WhatsApp")
+    br = sub.add_parser("base-rates", help="build the historical odds table for the watchlist")
+    br.add_argument("--start", default="2015-01-01")
+    br.add_argument("--end")
+    br.add_argument("--horizon", type=int, default=20)
     sg = sub.add_parser("signals", help="free mode: daily WhatsApp trade instructions")
     sg.add_argument("--no-whatsapp", action="store_true", help="only print")
     sg.add_argument("--engine", choices=["rotation", "swing"], help="rotation = Option B paper test (default)")
@@ -659,7 +718,7 @@ def main(argv: list[str] | None = None) -> int:
         "backtest": cmd_backtest, "scan": cmd_scan, "run": cmd_run, "job": cmd_job, "status": cmd_status,
         "kill": cmd_kill, "resume": cmd_resume, "preflight": cmd_preflight, "kite-login-url": cmd_kite_login,
         "kite-login": cmd_kite_login, "update-universe": cmd_update_universe, "test-whatsapp": cmd_test_whatsapp,
-        "analyze": cmd_analyze, "research": cmd_research, "portfolio-research": cmd_portfolio_research, "signals": cmd_signals, "took": cmd_took, "sold": cmd_sold, "journal": cmd_journal,
+        "analyze": cmd_analyze, "base-rates": cmd_base_rates, "research": cmd_research, "portfolio-research": cmd_portfolio_research, "signals": cmd_signals, "took": cmd_took, "sold": cmd_sold, "journal": cmd_journal,
     }
     return handlers[args.cmd](args, settings)
 

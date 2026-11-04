@@ -21,7 +21,7 @@ import pandas as pd
 from . import analysis
 from .config import Settings
 from .scanner import passes_universe
-from .setups import find_setup
+from .base_rates import evaluate_candidate
 
 
 def top_swing_picks(raw: dict[str, pd.DataFrame], index_df: pd.DataFrame, settings: Settings,
@@ -37,26 +37,13 @@ def top_swing_picks(raw: dict[str, pd.DataFrame], index_df: pd.DataFrame, settin
         row = f.iloc[i]
         if passes_universe(row, i + 1, ucfg) or not bool(row.get("hard_ok", False)):
             continue
-        window = f.iloc[max(0, i - 259): i + 1]
-        found = find_setup(sym, window, settings.section("setups"), settings.section("execution"), settings.section("risk"))
         rs = rs_panel.at[when, sym] if rs_panel is not None and sym in rs_panel.columns else np.nan
-        card = analysis.score(sym, row, rs_pct=rs, plan=found.plan if found else None,
-                              setup_quality=found.quality if found else 0.0)
-        if not card.passed_hard_filters:
+        cand = evaluate_candidate(sym, f, i, rs, settings)  # same logic as the historical odds
+        if cand is None:
             continue
-        atr = float(row["atr14"])
-        if found:
-            trigger, stop, setup = found.plan.trigger_price, found.plan.stop_price, found.plan.setup.value
-            resistance = found.plan.target_price
-        else:
-            trigger = round(float(row["high"]) * 1.001, 2)
-            stop, setup = round(trigger - 2 * atr, 2), "no setup yet"
-            resistance = None
-        risk = trigger - stop
-        t1 = round(trigger + 2 * risk, 2)  # target 1 = 2x the risk (the bot's minimum reward:risk)
-        t2 = round(max(resistance or 0, trigger + 3 * risk), 2)  # target 2 = resistance or 3x the risk
+        trigger, stop, setup, t1, t2 = cand["trigger"], cand["stop"], cand["setup"], cand["t1"], cand["t2"]
         rows.append({
-            "symbol": sym, "sector": (sectors or {}).get(sym, "UNKNOWN"), "score": card.total,
+            "symbol": sym, "sector": (sectors or {}).get(sym, "UNKNOWN"), "score": cand["score"],
             "rs_pct": round(float(rs), 0) if not pd.isna(rs) else np.nan, "close": round(float(row["close"]), 2),
             "ret_6m_pct": round(float(row["ret_126"]) * 100, 1) if not pd.isna(row.get("ret_126")) else np.nan,
             "setup": setup, "trigger": trigger, "stop": stop,
@@ -158,7 +145,10 @@ def _news_line(check) -> list[str]:
 
 def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Timestamp, eval_days: int = 10,
                  max_stop_pct: float = 8.0, capital: float = 10_000, max_position_pct: float = 50.0,
-                 news: dict | None = None) -> str:
+                 news: dict | None = None, odds: dict | None = None, fundamentals: dict | None = None) -> str:
+    from .base_rates import format_odds
+    from .fundamentals import format_fundamentals
+
     num = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
     limit_rs = capital * max_position_pct / 100
     L = ["🤖 TOP 5 SWING TRADING WATCHLIST", f"📅 {when:%A, %d %B %Y}", "", LINE,
@@ -187,6 +177,10 @@ def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Tim
         if r.trigger > limit_rs:
             L.append(f"⚠️ Capital Alert: 1 share costs approximately ₹{r.trigger:,.0f}. "
                      f"Exceeds ₹{limit_rs:,.0f} per-stock limit.")
+        if odds is not None:
+            L += format_odds(odds.get(r.symbol))
+        if fundamentals is not None:
+            L += format_fundamentals(fundamentals.get(r.symbol), r.sector)
         L += _news_line((news or {}).get(r.symbol))
         L.append("")
     L += [LINE, "📊 REPORT CARD"]

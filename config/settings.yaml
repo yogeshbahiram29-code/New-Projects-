@@ -220,6 +220,12 @@ top_picks:
   max_per_sector: 2         # diversification: at most 2 picks from one sector
   eval_days: 10             # each list is scored on its next-10-trading-day return vs NIFTY
   news: true                # show the latest 7-day headlines + risk flags for each pick
+  odds: true                # historical odds of similar setups (journal/base_rates.csv, refreshed weekly)
+  odds_min_cases: 30        # need at least this many past cases before showing odds
+  fundamentals: true        # market cap, P/E, ROE, debt, profit growth + flags
+
+dashboard:
+  enabled: true             # daily market dashboard (trend, breadth, VIX, sectors, global cues)
 
 notifications:
   whatsapp_provider: callmebot    # callmebot | meta | none

@@ -52,6 +52,22 @@ The first review is after 3 months. If B beats NIFTY without breaching the 20% d
 
 To get a deep dive on any stock: GitHub → Actions → **Analyze stock** → type the NSE symbol(s). The report arrives on Telegram.
 
+**Daily messages, in order:**
+1. 🌍 **Market dashboard:**
+   - NIFTY trend and 52-week distance
+   - breadth: % of NIFTY 500 stocks above their 200/50-day averages, advancing vs declining
+   - India VIX and Bank NIFTY
+   - strongest and weakest sectors
+   - global cues: S&P 500, Nasdaq, Brent, USD/INR, gold, US 10Y
+   - a plain "what it means" line
+2. 📁 **Option B paper portfolio**
+3. 📊 **Top 5 swing watchlist.** For each pick:
+   - 🎲 **historical odds:** how often similar past setups (same type, score band and market trend, NIFTY 500 since 2015) hit Target 1 before the stop
+   - 🏢 **fundamentals:** market cap, P/E, ROE, D/E, profit growth, with flags
+   - 📰 **news**
+
+The odds table (`journal/base_rates.csv`) is rebuilt every Saturday by the **Refresh odds** workflow. The odds are historical frequencies, not a prediction. They include today's-list survivorship bias and exclude charges.
+
 To run your own research: GitHub → Actions → **Research** (`kind: portfolio` or `swing`). For each test it reports:
 - top trades
 - year-by-year returns
