@@ -34,3 +34,22 @@ def test_fetch_falls_back_and_reports_failure(monkeypatch):
     chk = fetch_news("XYZ", "Xyz Ltd")
     assert not chk.ok and "couldn't fetch" in format_news(chk)[0]
     assert "nothing in the last 7 days" in format_news(NewsCheck([], [], True))[0]
+
+
+def test_short_name_and_relevance():
+    from swingbot.news import is_relevant, short_name
+
+    assert short_name("Petronet LNG Ltd.") == "Petronet LNG"
+    assert short_name("Divi's Laboratories Ltd.") == "Divi's Laboratories"
+    assert is_relevant("Cyient Q2 results: profit rises", "CYIENT", "Cyient Ltd.")
+    assert not is_relevant("Earnings To Watch: AIA Engineering Ltd Q2", "CYIENT", "Cyient Ltd.")
+    assert is_relevant("Divi's Labs hits record high", "DIVISLAB", "Divi's Laboratories Ltd.")
+
+
+def test_irrelevant_items_are_dropped(monkeypatch):
+    from swingbot.news import NewsItem
+
+    monkeypatch.setattr(news, "_google", lambda q, d, n: [NewsItem("Top pharma stocks to buy", "X", None)])
+    monkeypatch.setattr(news, "_yahoo", lambda s, d, n: [NewsItem("Earnings To Watch: Jyoti CNC", "Y", None)])
+    chk = fetch_news("CYIENT", "Cyient Ltd.")
+    assert chk.ok and chk.items == [] and "nothing in the last 7 days" in format_news(chk)[0]

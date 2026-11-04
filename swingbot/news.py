@@ -107,16 +107,44 @@ def _yahoo(symbol: str, days: int, limit: int) -> list[NewsItem]:
     return out[:limit]
 
 
+_SUFFIX = re.compile(r"\b(ltd\.?|limited|\(india\)|india ltd\.?|co\.?|corporation|corp\.?)\s*$", re.I)
+
+
+def short_name(name: str | None) -> str | None:
+    """'Petronet LNG Ltd.' -> 'Petronet LNG' (headlines rarely use the legal suffix)."""
+    if not name:
+        return None
+    n = name.strip()
+    for _ in range(2):
+        n = _SUFFIX.sub("", n).strip(" .,")
+    return n or None
+
+
+def is_relevant(title: str, symbol: str, name: str | None) -> bool:
+    """Keep only headlines that mention the company (symbol or first word of its name)."""
+    t = title.lower()
+    keys = {symbol.lower()}
+    sn = short_name(name)
+    if sn:
+        first = re.split(r"[\s'’]", sn)[0].lower()
+        if len(first) >= 3:
+            keys.add(first)
+    return any(re.search(r"\b" + re.escape(k), t) for k in keys)
+
+
 def fetch_news(symbol: str, name: str | None = None, days: int = 7, limit: int = 3) -> NewsCheck:
-    query = f'"{name}"' if name else f"{symbol} share NSE"
+    sn = short_name(name)
+    query = f"{sn} share" if sn else f"{symbol} share NSE"
+    reachable = False
     for fn, arg in ((_google, query), (_yahoo, symbol)):
         try:
-            items = fn(arg, days, limit)
+            items = [i for i in fn(arg, days, limit * 4) if is_relevant(i.title, symbol, name)][:limit]
+            reachable = True
             if items:
                 return NewsCheck(items, classify([i.title for i in items]), True)
         except Exception as e:  # network / parsing / blocked
             log.warning("news source %s failed for %s: %s", fn.__name__, symbol, e)
-    return NewsCheck([], [], ok=False)
+    return NewsCheck([], [], ok=reachable)
 
 
 def format_news(check: NewsCheck, indent: str = "   ") -> list[str]:
