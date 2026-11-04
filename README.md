@@ -40,6 +40,12 @@ R = the amount risked on one trade.
 
 So B is **not validated for real money**.
 
+**Machine learning (Upgrade 5, trained 2015–2022, tested on 10,455 trades from 2023–2026):**
+- **AUC:** logistic regression 0.58, gradient boosting 0.58, the bot's score 0.54. The models rank trades slightly better than the score, and they did so in every test year.
+- **After charges:** the models' best picks made only +0.01R to +0.05R a trade, against +0.02R for the score's best picks. That is nowhere near the +0.10R needed.
+- **Why:** the models mainly learned to prefer tight stops. Target 1 is closer with a tight stop, so it gets hit more often (32% vs 24%), but charges eat a bigger share of a small move.
+- **Verdict: not adopted.** The bot keeps the simple score. Details: `journal/ml_report.txt`.
+
 **What the daily message is now:** a **forward paper test of Option B**, using the exact backtested rules. The bot runs a ₹10,000 paper portfolio by itself (`journal/paper_rotation.json`), so you have nothing to record. Each weekday's message shows:
 - the market filter
 - the holdings
