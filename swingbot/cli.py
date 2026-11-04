@@ -446,6 +446,26 @@ def cmd_signals(args, settings) -> int:
     from .data import DataError
     from .signals import SignalError
 
+    engine = args.engine or settings.get("signals.engine", "rotation")
+    if engine == "rotation":  # Option B forward paper test
+        from .data import CachedData, make_provider
+        from .notify import Notifier
+        from .paper_rotation import RotationPaperTracker
+
+        loader = CachedData(make_provider(settings), settings.get("data.cache_dir", "data_cache"))
+        notifier = Notifier(settings.get("notifications.whatsapp_provider", "callmebot"), settings.get("paths.state_dir", "state"),
+                            store_path=Path(settings.get("signals.dir", "journal")) / "telegram.json")
+        tracker = RotationPaperTracker(settings, loader, notifier)
+        try:
+            print(tracker.run(send=not args.no_whatsapp))
+        except (DataError, RuntimeError) as e:
+            print(f"ERROR: {e}")
+            return 1
+        if tracker.sent_ok is False:
+            print(f"ERROR: the {notifier.provider} alert was NOT delivered (see warnings above).")
+            return 3
+        return 0
+
     desk = _desk(settings, need_data=True)
     try:
         print(desk.run(send=not args.no_whatsapp))
@@ -541,6 +561,7 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--costs", default="zerodha", choices=["zerodha", "groww", "paper"])
     sg = sub.add_parser("signals", help="free mode: daily WhatsApp trade instructions")
     sg.add_argument("--no-whatsapp", action="store_true", help="only print")
+    sg.add_argument("--engine", choices=["rotation", "swing"], help="rotation = Option B paper test (default)")
     tk = sub.add_parser("took", help="free mode: record a buy")
     tk.add_argument("symbol")
     tk.add_argument("qty", type=int)

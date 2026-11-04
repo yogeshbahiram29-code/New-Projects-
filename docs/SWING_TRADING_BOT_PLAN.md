@@ -594,3 +594,24 @@ Each phase has a clear finish line. We move to the next phase only when the curr
 - **US:** Check pattern-day-trader rules if a position is opened and closed on the same day (rare for swing trading, but possible when a stop triggers on entry day), and broker API terms.
 - **Taxes:** Short-term capital gains apply to swing trades; the journal will export a trade report to help with tax filing.
 - **Disclaimer:** This is a software tool, not investment advice. Trading involves the risk of losing money. Past and backtested performance does not guarantee future results. Only trade with capital you can afford to lose, and keep the bot under your supervision.
+
+---
+
+## 18. Research results on real NSE data (Nov 2026)
+
+All results are after Zerodha delivery charges and 0.15% slippage per side. Signals are computed on the close and executed at the next open. A test confirms there is no look-ahead.
+
+| Strategy | Development 2015–22 | Unseen 2023 → Nov 2026 | Verdict |
+|---|---|---|---|
+| Original swing bot | −0.18R per trade, CAGR −8.6%, drawdown 53% | — | Failed |
+| Simplified momentum swing (8 parameters) | about 0R per trade, CAGR −0.3% to −1% | — | Failed |
+| C: NIFTY 10-month trend rule | CAGR 3.7% | CAGR 6.4% | Failed (below buy & hold) |
+| B: monthly top-10 momentum rotation | CAGR 25%, drawdown 27% | CAGR 14.5%, drawdown 28%, 93 trades | Beat NIFTY (6.8%) but failed: drawdown >20%, unseen result only 58% of development, <100 trades, small edge over random picks (13.0%) |
+
+Known biases:
+- The universe is today's NIFTY 500 plus 31 fallen/merged names, so some survivorship bias remains.
+- Prices are not adjusted for dividends.
+- The benchmark is the NIFTY 50 price index (no dividends).
+
+Decision: Option B runs as a forward **paper** test (`signals.engine: rotation`) with frozen rules. The first review is 3 months after the start. No real money until it passes.
+

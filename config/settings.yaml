@@ -192,11 +192,24 @@ schedule:
 # The bot WhatsApps exact orders; you place them in the app.
 # ---------------------------------------------------------------------
 signals:
+  # rotation = forward PAPER test of Option B (monthly momentum, automatic, no recording needed)
+  # swing    = daily swing signals you place by hand (failed its backtest - kept for reference)
+  engine: rotation
   dir: journal                    # your positions + trade history (plain CSV/JSON)
   broker_costs: zerodha           # zerodha = ₹0 brokerage on delivery (cheapest for swing trades)
   # Set to true ONLY after the backtest says READY and you've paper traded for a few weeks.
   # While false, every signal message starts with a "PAPER TRADING ONLY" warning.
   strategy_validated: false
+
+# ---------------------------------------------------------------------
+# Option B - monthly momentum rotation (frozen rules, as backtested)
+# ---------------------------------------------------------------------
+rotation:
+  top_n: 10                 # hold the 10 strongest liquid stocks above their 200-day average
+  buffer: 2.0               # keep a holding while it stays in the top 20
+  regime_sma: 200           # invested only while NIFTY 50 > its rising 200-day average
+  drawdown_alert_pct: 20    # forward-test risk limit
+  review_after_months: 3    # first review of the paper results
 
 notifications:
   whatsapp_provider: callmebot    # callmebot | meta | none

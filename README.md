@@ -18,7 +18,45 @@ The full design (strategy, risk rules, why each one exists) is in **[docs/SWING_
 
 ---
 
-## 🆓 ₹0 swing trading: free signal mode (start here)
+## 📊 Current status (4 Nov 2026): research results and the paper test
+
+Every strategy was tested on real NSE data, after all Zerodha charges.
+
+| Strategy | 2015–2022 (development) | 2023 → Nov 2026 (unseen data) | Verdict |
+|---|---|---|---|
+| Original swing bot | −0.18R per trade, −8.6% a year | — | ❌ loses money |
+| Simplified swing (momentum, 2–20 days) | about break-even | — | ❌ below NIFTY |
+| C: NIFTY trend ETF (10-month average) | 3.7% a year | 6.4% a year | ❌ below NIFTY |
+| **B: Monthly momentum rotation (top 10)** | 25% a year, worst drop 27% | **14.5% a year, worst drop 28%** | ⚠️ beat NIFTY (6.8%) but failed 3 of 5 rules |
+| NIFTY 50 buy & hold | 10.1% a year, worst drop 38% | 6.8% a year, worst drop 16% | benchmark |
+
+R = the amount risked on one trade.
+
+**What B failed:**
+- worst drop above 20%
+- its 2023–26 result reached only 58% of the 2015–22 result
+- fewer than 100 trades
+- in 2023–26 it beat randomly picked stocks by only about 1.5% a year
+
+So B is **not validated for real money**.
+
+**What the daily message is now:** a **forward paper test of Option B**, using the exact backtested rules. The bot runs a ₹10,000 paper portfolio by itself (`journal/paper_rotation.json`), so you have nothing to record. Each weekday's message shows:
+- the market filter
+- the holdings
+- profit/loss against NIFTY since the start
+- the drawdown check
+
+The first review is after 3 months. If B beats NIFTY without breaching the 20% drawdown limit, we can discuss real money. Otherwise we stop.
+
+To run your own research: GitHub → Actions → **Research** (`kind: portfolio` or `swing`). For each test it reports:
+- top trades
+- year-by-year returns
+- a random-picks control
+- a clean-data rerun
+
+---
+
+## 🆓 ₹0 swing trading: free signal mode
 
 You don't need a paid server or a paid broker API. In **signal mode**:
 1. The bot does all the analysis and risk management.

@@ -131,19 +131,41 @@ def _features(df: pd.DataFrame, min_value: float, min_price: float, min_hist: in
     return out
 
 
+def rotation_orders(order: list[str], held: list[str], regime_on: bool, top_n: int = 10,
+                    buffer: float = 2.0) -> tuple[list[str], list[str]]:
+    """The Option B decision rule, shared by the backtest and the paper tracker.
+
+    order: eligible symbols, best first. Returns (sell, buy) lists to execute at
+    the next open. Regime off -> sell everything, buy nothing.
+    """
+    if not regime_on:
+        return list(held), []
+    keep_zone = set(order[: int(top_n * buffer)])
+    keep = [s for s in held if s in keep_zone]
+    sells = [s for s in held if s not in keep_zone]
+    buys = [s for s in order if s not in held][: max(top_n - len(keep), 0)]
+    return sells, buys
+
+
+def rotation_inputs(raw: dict[str, pd.DataFrame], index_df: pd.DataFrame, min_value_cr: float = 10,
+                    min_price: float = 50, min_hist: int = 260, regime_sma: int = 200):
+    """Score panel (NaN = not eligible), and the NIFTY regime series."""
+    feats = {s: _features(df, min_value_cr * 1e7, min_price, min_hist) for s, df in raw.items() if len(df) > 0}
+    score = pd.DataFrame({s: f["score"].where(f["eligible"]) for s, f in feats.items()})
+    ic = index_df["close"]
+    im = sma(ic, regime_sma)
+    regime_on = ((ic > im) & (im > im.shift(20))).fillna(False)
+    return feats, score, regime_on
+
+
 def backtest_momentum_rotation(raw: dict[str, pd.DataFrame], index_df: pd.DataFrame, start, end, capital: float,
                                costs: CostModel, top_n: int = 10, buffer: float = 2.0, min_value_cr: float = 10,
                                min_price: float = 50, min_hist: int = 260, regime_sma: int = 200,
                                cash_yield_pct: float = 0.0, pick: str = "momentum", seed: int = 0) -> PortfolioResult:
     slip = costs.slippage_pct / 100
-    feats = {s: _features(df, min_value_cr * 1e7, min_price, min_hist) for s, df in raw.items() if len(df) > 0}
-    score = pd.DataFrame({s: f["score"].where(f["eligible"]) for s, f in feats.items()})
+    feats, score, regime_on = rotation_inputs(raw, index_df, min_value_cr, min_price, min_hist, regime_sma)
     closes = pd.DataFrame({s: f["close"] for s, f in feats.items()})
     opens = pd.DataFrame({s: f["open"] for s, f in feats.items()})
-
-    ic = index_df["close"]
-    im = sma(ic, regime_sma)
-    regime_on = ((ic > im) & (im > im.shift(20))).fillna(False)
 
     all_days = index_df.index
     days = all_days[(all_days >= pd.Timestamp(start)) & (all_days <= pd.Timestamp(end))]
@@ -180,7 +202,9 @@ def backtest_momentum_rotation(raw: dict[str, pd.DataFrame], index_df: pd.DataFr
                 if sym in holdings and not pd.isna(o):
                     sell(sym, t, float(o) * (1 - slip), "rebalance")
                     pending_sells.remove(sym)
-            equity_now = cash + sum(h["qty"] * float(closes.at[t, s]) for s, h in holdings.items())
+            # size with YESTERDAY's closes - today's close isn't known at the open
+            prev_t = all_days[max(all_days.get_loc(t) - 1, 0)]
+            equity_now = cash + sum(h["qty"] * float(closes.at[prev_t, s]) for s, h in holdings.items())
             slot = equity_now / top_n
             for sym in list(pending_buys):
                 o = opens.at[t, sym]
@@ -212,18 +236,12 @@ def backtest_momentum_rotation(raw: dict[str, pd.DataFrame], index_df: pd.DataFr
         # 3) month-end decision on the close
         if t in me_set:
             rebalances += 1
-            if not regime_on.at[t]:
-                pending_sells = list(holdings)
-                continue
             row = score.loc[t].dropna() if t in score.index else pd.Series(dtype=float)
             if pick == "random":
                 order = list(rng.permutation(row.index.to_numpy()))
             else:
                 order = list(row.sort_values(ascending=False).index)
-            keep_zone = set(order[: int(top_n * buffer)])
-            keep = [s for s in holdings if s in keep_zone]
-            pending_sells = [s for s in holdings if s not in keep_zone]
-            pending_buys = [s for s in order if s not in holdings][: max(top_n - len(keep), 0)]
+            pending_sells, pending_buys = rotation_orders(order, list(holdings), bool(regime_on.at[t]), top_n, buffer)
 
     if holdings and len(days):  # mark-to-market close-out at the end (not real trades)
         t = days[-1]

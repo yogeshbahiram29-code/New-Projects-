@@ -31,6 +31,12 @@ jobs:
           cache: pip
       - name: Install
         run: pip install pandas numpy PyYAML requests yfinance
+      - name: Restore price cache (only new days are downloaded)
+        uses: actions/cache@v4
+        with:
+          path: data_cache
+          key: prices-${{ github.run_id }}
+          restore-keys: prices-
       - name: Analyse market and send WhatsApp signals
         env:
           # repository secrets preferred; repository variables accepted as a fallback
