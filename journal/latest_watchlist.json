@@ -14,40 +14,40 @@
      "t2": 30233.37
     },
     {
-     "symbol": "GESHIP",
-     "setup": "pullback",
-     "score": 80.8,
+     "symbol": "PVRINOX",
+     "setup": "breakout",
+     "score": 83.1,
      "trigger": 1583.58,
-     "stop": 1494.71,
-     "t1": 1761.32,
-     "t2": 1850.19
+     "stop": 1504.26,
+     "t1": 1742.22,
+     "t2": 1821.54
     },
     {
      "symbol": "PETRONET",
      "setup": "breakout",
-     "score": 78.9,
-     "trigger": 312.16,
-     "stop": 302.18,
-     "t1": 332.12,
-     "t2": 342.12
+     "score": 82.5,
+     "trigger": 312.31,
+     "stop": 302.17,
+     "t1": 332.59,
+     "t2": 342.73
     },
     {
-     "symbol": "CYIENT",
+     "symbol": "GESHIP",
      "setup": "pullback",
-     "score": 75.0,
-     "trigger": 1153.05,
-     "stop": 1097.91,
-     "t1": 1263.33,
-     "t2": 1318.47
+     "score": 80.7,
+     "trigger": 1584.08,
+     "stop": 1494.7,
+     "t1": 1762.84,
+     "t2": 1852.22
     },
     {
-     "symbol": "AUROPHARMA",
+     "symbol": "ADANIPORTS",
      "setup": "breakout",
-     "score": 70.4,
-     "trigger": 1726.32,
-     "stop": 1680.79,
-     "t1": 1817.38,
-     "t2": 1862.94
+     "score": 77.4,
+     "trigger": 1923.22,
+     "stop": 1844.76,
+     "t1": 2080.14,
+     "t2": 2158.62
     }
    ]
   }
