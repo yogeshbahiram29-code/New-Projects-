@@ -191,10 +191,12 @@ class CachedData:
         for s in symbols:
             p = self._path(s)
             if p.exists():
-                df = pd.read_csv(p, index_col=0, parse_dates=True)
+                # a candle saved while the market was open is incomplete - drop it, and always
+                # re-download the last few days so a complete candle replaces it
+                df = drop_unfinished_bar(pd.read_csv(p, index_col=0, parse_dates=True))
                 frames[s] = df
                 last = df.index[-1].date() if len(df) else start
-                if last < end:
+                if last <= end:
                     need.setdefault(last - timedelta(days=5), []).append(s)
             else:
                 need.setdefault(start, []).append(s)

@@ -113,3 +113,22 @@ def test_odds_labels_are_conservative():
     assert "thin edge" in format_odds({**base, "avg_r": 0.12})[1]
     assert "positive edge" in format_odds({**base, "avg_r": 0.3})[1]
     assert format_fundamentals({"earningsGrowth": -0.001, "marketCap": 1e10})[0].endswith("Profit growth 0%")
+
+
+def test_cache_replaces_a_partial_candle(tmp_path):
+    from datetime import date as d
+
+    from swingbot.data import CachedData
+
+    idx = pd.bdate_range("2025-01-01", "2026-11-04")
+    full = pd.DataFrame({"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1e6}, index=idx)
+    partial = full.copy()
+    partial.iloc[-1, partial.columns.get_loc("volume")] = 1e5  # saved mid-session by an older run
+
+    class Provider:
+        def daily_many(self, syms, since, end):
+            return {s: full.loc[pd.Timestamp(since):] for s in syms}
+
+    partial.to_csv(tmp_path / "ABC.csv")
+    out = CachedData(Provider(), tmp_path).load(["ABC"], 300, d(2026, 11, 4))
+    assert out["ABC"]["volume"].iloc[-1] == 1e6  # the complete candle replaced the partial one
