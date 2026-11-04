@@ -1,0 +1,43 @@
+# Analyse any NSE stock by the bot's rules and get the report on Telegram/WhatsApp.
+# Phone: GitHub app -> Actions -> "Analyze stock" -> Run workflow -> type the NSE symbol(s).
+name: Analyze stock
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "NSE symbol(s), space separated, e.g. VMM  (Vishal Mega Mart)  or  VMM TRENT DMART"
+        default: "VMM"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install pandas numpy PyYAML requests yfinance
+      - name: Restore price cache
+        uses: actions/cache@v4
+        with:
+          path: data_cache
+          key: prices-analyze-${{ github.run_id }}
+          restore-keys: prices-
+      - name: Analyse and send
+        shell: bash
+        env:
+          PYTHONWARNINGS: ignore
+          SYMBOLS: ${{ inputs.symbols }}
+          WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE || vars.WHATSAPP_PHONE }}
+          CALLMEBOT_API_KEY: ${{ secrets.CALLMEBOT_API_KEY || vars.CALLMEBOT_API_KEY }}
+          NOTIFY_PROVIDER: ${{ vars.NOTIFY_PROVIDER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
+        run: python -m swingbot analyze $SYMBOLS --send 2>&1 | grep -v "Pandas4Warning\|inplace\|whatsnew\|Failed download\|possibly delisted"

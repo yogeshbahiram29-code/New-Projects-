@@ -261,6 +261,31 @@ def cmd_portfolio_research(args, settings) -> int:
     return 0
 
 
+def cmd_analyze(args, settings) -> int:
+    """Technical analysis of one stock by the bot's rules (optionally sent to Telegram/WhatsApp)."""
+    from .data import CachedData, load_full_universe, make_provider
+    from .notify import Notifier
+    from .stock_report import analyze_stock
+
+    uni = load_full_universe(settings)
+    bench = settings.get("regime.benchmark", "NIFTY50")
+    syms = sorted(set(uni) | {s.upper() for s in args.symbols})
+    cache = CachedData(make_provider(settings), settings.get("data.cache_dir", "data_cache"))
+    raw = cache.load(syms + [bench], int(settings.get("data.history_days", 600)))
+    index_df = raw.pop(bench)
+    reports = [analyze_stock(sym, raw, index_df, settings, uni) for sym in args.symbols]
+    text = "\n\n".join(reports)
+    print(text)
+    if args.send:
+        n = Notifier(settings.get("notifications.whatsapp_provider", "callmebot"), settings.get("paths.state_dir", "state"),
+                     store_path=Path(settings.get("signals.dir", "journal")) / "telegram.json")
+        for r in reports:
+            if not n.send(r):
+                print(f"ERROR: the {n.provider} message was NOT delivered.")
+                return 3
+    return 0
+
+
 def cmd_scan(args, settings) -> int:
     from .costs import CostModel
     from .data import CachedData, events_calendar, load_full_universe, make_provider
@@ -559,6 +584,9 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--start", default="2015-01-01")
     pr.add_argument("--end", default="2022-12-31")
     pr.add_argument("--costs", default="zerodha", choices=["zerodha", "groww", "paper"])
+    an = sub.add_parser("analyze", help="technical analysis of one or more stocks, e.g. analyze VMM")
+    an.add_argument("symbols", nargs="+", help="NSE symbols, e.g. VMM (Vishal Mega Mart)")
+    an.add_argument("--send", action="store_true", help="also send the report to Telegram/WhatsApp")
     sg = sub.add_parser("signals", help="free mode: daily WhatsApp trade instructions")
     sg.add_argument("--no-whatsapp", action="store_true", help="only print")
     sg.add_argument("--engine", choices=["rotation", "swing"], help="rotation = Option B paper test (default)")
@@ -592,7 +620,7 @@ def main(argv: list[str] | None = None) -> int:
         "backtest": cmd_backtest, "scan": cmd_scan, "run": cmd_run, "job": cmd_job, "status": cmd_status,
         "kill": cmd_kill, "resume": cmd_resume, "preflight": cmd_preflight, "kite-login-url": cmd_kite_login,
         "kite-login": cmd_kite_login, "update-universe": cmd_update_universe, "test-whatsapp": cmd_test_whatsapp,
-        "research": cmd_research, "portfolio-research": cmd_portfolio_research, "signals": cmd_signals, "took": cmd_took, "sold": cmd_sold, "journal": cmd_journal,
+        "analyze": cmd_analyze, "research": cmd_research, "portfolio-research": cmd_portfolio_research, "signals": cmd_signals, "took": cmd_took, "sold": cmd_sold, "journal": cmd_journal,
     }
     return handlers[args.cmd](args, settings)
 

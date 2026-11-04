@@ -48,3 +48,14 @@ def test_rotation_never_exceeds_top_n_and_random_control_differs():
     rnd = backtest_momentum_rotation(stocks, idx, idx.index[300], idx.index[-1], 1_000_000, costs, top_n=5,
                                      min_value_cr=0, pick="random", seed=1)
     assert [t["symbol"] for t in rnd.trades] != [t["symbol"] for t in mom.trades]
+
+
+def test_stock_report_runs_and_handles_unknown_symbol():
+    from swingbot.config import load_settings
+    from swingbot.stock_report import analyze_stock
+
+    stocks, idx, sectors = make_market(n_stocks=25, years=3, seed=3)
+    s = load_settings(overrides={"universe": {"min_avg_traded_value_cr": 0}})
+    rep = analyze_stock("STOCK05", stocks, idx, s, sectors)
+    assert "BOT SCORE" in rep and "VERDICT" in rep and "Not investment advice" in rep
+    assert "no price data" in analyze_stock("NOPE", stocks, idx, s, sectors)
