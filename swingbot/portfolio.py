@@ -235,6 +235,32 @@ def backtest_momentum_rotation(raw: dict[str, pd.DataFrame], index_df: pd.DataFr
 
 
 # ---------------------------------------------------------------------------
+# data sanity
+# ---------------------------------------------------------------------------
+def suspicious_symbols(raw: dict[str, pd.DataFrame], start, end, threshold: float = 0.25) -> dict[str, list]:
+    """Stocks with a one-day close-to-close move above ``threshold`` inside the window.
+
+    NSE price bands cap most stocks at 20% a day, so a bigger move is almost
+    always a data error or an unadjusted corporate action (split/bonus/demerger).
+    """
+    out = {}
+    lo, hi = pd.Timestamp(start) - pd.Timedelta(days=400), pd.Timestamp(end)
+    for sym, df in raw.items():
+        c = df["close"].loc[lo:hi]
+        jumps = c.pct_change().abs()
+        bad = jumps[jumps > threshold]
+        if len(bad):
+            out[sym] = [(d.date(), round(float(c.pct_change().loc[d]) * 100, 1)) for d in bad.index[:3]]
+    return out
+
+
+def max_jump_during(df: pd.DataFrame, start, end) -> float:
+    c = df["close"].loc[pd.Timestamp(start): pd.Timestamp(end)]
+    j = c.pct_change().abs().max()
+    return round(float(j) * 100, 1) if not pd.isna(j) else 0.0
+
+
+# ---------------------------------------------------------------------------
 # metrics for portfolio strategies
 # ---------------------------------------------------------------------------
 def portfolio_trade_metrics(trades: list[dict]) -> dict:

@@ -162,7 +162,8 @@ def cmd_portfolio_research(args, settings) -> int:
     from . import metrics
     from .costs import CostModel
     from .data import CachedData, load_full_universe, make_provider
-    from .portfolio import backtest_index_trend, backtest_momentum_rotation, portfolio_trade_metrics
+    from .portfolio import (backtest_index_trend, backtest_momentum_rotation, max_jump_during,
+                            portfolio_trade_metrics, suspicious_symbols)
 
     end = pd.Timestamp(args.end).date()
     uni = load_full_universe(settings)
@@ -184,6 +185,14 @@ def cmd_portfolio_research(args, settings) -> int:
             runs.append((cap, backtest_momentum_rotation(raw, index_df, args.start, end, cap, costs,
                                                          min_value_cr=float(ucfg.get("min_avg_traded_value_cr", 10)),
                                                          min_price=float(ucfg.get("min_price", 50)), cash_yield_pct=y)))
+    # red-flag check: rerun B without stocks whose data shows >25% one-day jumps (data errors / corporate actions)
+    bad = suspicious_symbols(raw, args.start, end)
+    clean_raw = {s: df for s, df in raw.items() if s not in bad}
+    clean = backtest_momentum_rotation(clean_raw, index_df, args.start, end, 1_000_000, costs,
+                                       min_value_cr=float(ucfg.get("min_avg_traded_value_cr", 10)),
+                                       min_price=float(ucfg.get("min_price", 50)))
+    clean.name = "B: momentum top 10, cash 0%, CLEAN data"
+    runs.append((1_000_000, clean))
     controls = [backtest_momentum_rotation(raw, index_df, args.start, end, 1_000_000, costs, pick="random", seed=k,
                                            min_value_cr=float(ucfg.get("min_avg_traded_value_cr", 10)))
                 for k in range(5)]
@@ -219,6 +228,22 @@ def cmd_portfolio_research(args, settings) -> int:
     for cap, res in runs:
         if res.notes and cap == 1_000_000:
             print(f"\nNotes for {res.name}: " + "; ".join(res.notes))
+
+    # ---- red-flag investigation: where did the big years come from?
+    b_main = next(r for c, r in runs if c == 1_000_000 and r.name.startswith("B: momentum") and "cash 0%" in r.name)
+    tr = pd.DataFrame(b_main.trades)
+    if len(tr):
+        tr["year"] = pd.to_datetime(tr["exit_date"]).dt.year
+        tr["max_1day_jump_pct"] = [max_jump_during(raw[r.symbol], r.entry_date, r.exit_date) for r in tr.itertuples()]
+        print("\nRED-FLAG CHECK - top 15 trades by profit (B, ₹10L, cash 0%)")
+        cols = ["symbol", "entry_date", "exit_date", "days", "ret_pct", "pnl", "max_1day_jump_pct", "exit_reason"]
+        print(tr.sort_values("pnl", ascending=False)[cols].head(15).round(1).to_string(index=False))
+        print("\nProfit by year: " + ", ".join(f"{y}: ₹{v:,.0f}" for y, v in tr.groupby("year")["pnl"].sum().items()))
+        n_bad = int((tr["max_1day_jump_pct"] > 25).sum())
+        print(f"Trades with a >25% one-day jump while held: {n_bad} of {len(tr)}")
+    print(f"\nStocks with >25% one-day jumps in the data (excluded in the CLEAN run): {len(bad)}")
+    for sym, js in list(bad.items())[:25]:
+        print(f"  {sym}: {js}")
     return 0
 
 
