@@ -162,7 +162,7 @@ def cmd_portfolio_research(args, settings) -> int:
     from . import metrics
     from .costs import CostModel
     from .data import CachedData, load_full_universe, make_provider
-    from .portfolio import (backtest_index_trend, backtest_momentum_rotation, max_jump_during,
+    from .portfolio import (backtest_index_trend, backtest_momentum_rotation, current_picks, max_jump_during,
                             portfolio_trade_metrics, suspicious_symbols)
 
     end = pd.Timestamp(args.end).date()
@@ -244,6 +244,20 @@ def cmd_portfolio_research(args, settings) -> int:
     print(f"\nStocks with >25% one-day jumps in the data (excluded in the CLEAN run): {len(bad)}")
     for sym, js in list(bad.items())[:25]:
         print(f"  {sym}: {js}")
+
+    # ---- today's view (only meaningful when --end is the latest date)
+    regime, picks = current_picks(raw, index_df, min_value_cr=float(ucfg.get("min_avg_traded_value_cr", 10)),
+                                  min_price=float(ucfg.get("min_price", 50)), sectors=uni)
+    print("\n" + "=" * 100 + f"\nCURRENT VIEW - data up to {regime['date']}\n" + "=" * 100)
+    print(f"NIFTY 50 {regime['nifty']} vs 200-day SMA {regime['sma200']} (SMA rising: {regime['sma200_rising']}) -> "
+          f"regime {'ON (invest)' if regime['on_today'] else 'OFF (cash)'} today; "
+          f"at the last month-end ({regime['month_end']}): {'ON' if regime['on_at_month_end'] else 'OFF'}")
+    if regime["on_at_month_end"] and len(picks):
+        print(f"Option B top 10 from the {regime['month_end']} close (bought at the next open):")
+        print(picks.to_string())
+    elif len(picks):
+        print("Regime was OFF at the last month-end -> Option B would hold CASH. Strongest stocks for reference:")
+        print(picks.to_string())
     return 0
 
 

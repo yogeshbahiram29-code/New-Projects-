@@ -235,6 +235,41 @@ def backtest_momentum_rotation(raw: dict[str, pd.DataFrame], index_df: pd.DataFr
 
 
 # ---------------------------------------------------------------------------
+# what Option B holds right now
+# ---------------------------------------------------------------------------
+def current_picks(raw: dict[str, pd.DataFrame], index_df: pd.DataFrame, top_n: int = 10, min_value_cr: float = 10,
+                  min_price: float = 50, min_hist: int = 260, regime_sma: int = 200, sectors: dict | None = None):
+    """Picks from the most recent month-end close (the official rebalance), plus today's regime."""
+    days = index_df.index
+    me = month_end_days(days)
+    # the newest "month-end" may be today's date inside an unfinished month -> use the previous one
+    last_me = me[-1]
+    if len(me) > 1 and days[-1].month == (days[-1] + pd.offsets.BDay(1)).month:
+        last_me = me[-2]
+    ic = index_df["close"]
+    im = sma(ic, regime_sma)
+    regime = {
+        "date": days[-1].date(), "nifty": round(float(ic.iloc[-1]), 1), "sma200": round(float(im.iloc[-1]), 1),
+        "sma200_rising": bool(im.iloc[-1] > im.iloc[-21]),
+        "on_today": bool(ic.iloc[-1] > im.iloc[-1] and im.iloc[-1] > im.iloc[-21]),
+        "on_at_month_end": bool(ic.loc[last_me] > im.loc[last_me] and im.loc[last_me] > im.shift(20).loc[last_me]),
+        "month_end": last_me.date(),
+    }
+    rows = []
+    for sym, df in raw.items():
+        f = _features(df, min_value_cr * 1e7, min_price, min_hist)
+        if last_me not in f.index or not bool(f.at[last_me, "eligible"]) or pd.isna(f.at[last_me, "score"]):
+            continue
+        c = df["close"]
+        rows.append({"symbol": sym, "sector": (sectors or {}).get(sym, ""), "score_pct": round(f.at[last_me, "score"] * 100, 1),
+                     "ret_6m_pct": round((c.loc[last_me] / c.shift(126).loc[last_me] - 1) * 100, 1),
+                     "ret_12m_pct": round((c.loc[last_me] / c.shift(252).loc[last_me] - 1) * 100, 1),
+                     "close_month_end": round(float(c.loc[last_me]), 2), "close_latest": round(float(c.iloc[-1]), 2)})
+    picks = pd.DataFrame(rows).sort_values("score_pct", ascending=False).head(top_n).reset_index(drop=True) if rows else pd.DataFrame()
+    return regime, picks
+
+
+# ---------------------------------------------------------------------------
 # data sanity
 # ---------------------------------------------------------------------------
 def suspicious_symbols(raw: dict[str, pd.DataFrame], start, end, threshold: float = 0.25) -> dict[str, list]:
