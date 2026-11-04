@@ -1,0 +1,55 @@
+{
+ "history": [
+  {
+   "date": "2026-11-04",
+   "regime_on": false,
+   "picks": [
+    {
+     "symbol": "PTCIL",
+     "setup": "pullback",
+     "score": 92.0,
+     "trigger": 24709.68,
+     "stop": 22868.46,
+     "t1": 28392.12,
+     "t2": 30233.37
+    },
+    {
+     "symbol": "GESHIP",
+     "setup": "pullback",
+     "score": 80.8,
+     "trigger": 1583.58,
+     "stop": 1494.71,
+     "t1": 1761.32,
+     "t2": 1850.19
+    },
+    {
+     "symbol": "PETRONET",
+     "setup": "breakout",
+     "score": 78.9,
+     "trigger": 312.16,
+     "stop": 302.18,
+     "t1": 332.12,
+     "t2": 342.12
+    },
+    {
+     "symbol": "CYIENT",
+     "setup": "pullback",
+     "score": 75.0,
+     "trigger": 1153.05,
+     "stop": 1097.91,
+     "t1": 1263.33,
+     "t2": 1318.47
+    },
+    {
+     "symbol": "AUROPHARMA",
+     "setup": "breakout",
+     "score": 70.4,
+     "trigger": 1726.32,
+     "stop": 1680.79,
+     "t1": 1817.38,
+     "t2": 1862.94
+    }
+   ]
+  }
+ ]
+}
