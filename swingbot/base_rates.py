@@ -85,8 +85,37 @@ def simulate(o, h, lo, c, i: int, trigger: float, stop: float, t1: float, horizo
     return "timeout", (c[last] - entry) / risk, last - j + 1
 
 
+FEATURE_COLS = ["rsi14", "rsi2", "adx14", "atr_pct", "vol_ratio", "bbw", "updown_vol_ratio", "dist_days10",
+                "rs_composite", "sma200_slope", "sma50_slope", "ret_63", "ret_126", "idx_ret_63"]
+
+
+def _ratio(a, b) -> float:
+    try:
+        a, b = float(a), float(b)
+    except (TypeError, ValueError):
+        return np.nan
+    return a / b - 1 if b and np.isfinite(a) and np.isfinite(b) else np.nan
+
+
+def signal_features(row: pd.Series, cand: dict, rs: float, regime_on: bool) -> dict:
+    """What was knowable on the signal day's close (used by the ML test - no future data)."""
+    out = {k: float(row[k]) if k in row and pd.notna(row[k]) else np.nan for k in FEATURE_COLS}
+    tv = row.get("traded_value_avg20", np.nan)
+    out.update({
+        "score": cand["score"], "rs_pct": float(rs) if pd.notna(rs) else np.nan,
+        "d_high52": _ratio(row["close"], row.get("high_52w")), "d_sma50": _ratio(row["close"], row.get("sma50")),
+        "d_sma200": _ratio(row["close"], row.get("sma200")), "trig_gap": _ratio(cand["trigger"], row["close"]),
+        "stop_pct": (cand["trigger"] - cand["stop"]) / cand["trigger"] * 100,
+        "log_value": float(np.log10(tv)) if pd.notna(tv) and tv > 0 else np.nan,
+        "regime_on": float(regime_on),
+        "is_breakout": float(normalize_setup(cand["setup"]) == "breakout"),
+        "is_pullback": float(normalize_setup(cand["setup"]) == "pullback"),
+    })
+    return out
+
+
 def build_events(raw: dict[str, pd.DataFrame], index_df: pd.DataFrame, settings: Settings, start, end=None,
-                 horizon: int = 20, gap_days: int = 10, progress: bool = False) -> pd.DataFrame:
+                 horizon: int = 20, gap_days: int = 10, progress: bool = False, features: bool = False) -> pd.DataFrame:
     frames, rs_panel = analysis.prepare_universe(raw, index_df)
     ic = index_df["close"]
     m = ic.rolling(200).mean()
@@ -112,9 +141,13 @@ def build_events(raw: dict[str, pd.DataFrame], index_df: pd.DataFrame, settings:
             if cand is None:
                 continue
             outcome, r, days = simulate(o, h, lo, c, i, cand["trigger"], cand["stop"], cand["t1"], horizon)
-            rows.append({"date": t.date(), "symbol": sym, "setup": normalize_setup(cand["setup"]),
-                         "band": score_band(cand["score"]), "regime": "on" if bool(regime_on.get(t, False)) else "off",
-                         "outcome": outcome, "r": round(r, 3), "days": days})
+            reg = bool(regime_on.get(t, False))
+            row = {"date": t.date(), "symbol": sym, "setup": normalize_setup(cand["setup"]),
+                   "band": score_band(cand["score"]), "regime": "on" if reg else "off",
+                   "outcome": outcome, "r": round(r, 3), "days": days}
+            if features:
+                row.update(signal_features(f.iloc[i], cand, rs, reg))
+            rows.append(row)
             last_i = i
     return pd.DataFrame(rows)
 
@@ -179,4 +212,4 @@ def format_odds(o: dict | None) -> list[str]:
                else "❌ no real edge")]
 
 
-__all__ = ["build_events", "summarize", "lookup", "format_odds", "evaluate_candidate", "simulate", "score_band"]
+__all__ = ["build_events", "signal_features", "FEATURE_COLS", "summarize", "lookup", "format_odds", "evaluate_candidate", "simulate", "score_band"]

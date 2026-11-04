@@ -284,6 +284,11 @@ def cmd_analyze(args, settings) -> int:
             from .fundamentals import fetch_fundamentals, format_fundamentals
 
             rep += "\n\n" + "\n".join(format_fundamentals(fetch_fundamentals(sym.upper()), uni.get(sym.upper(), "")))
+            from .volume_quality import fetch_delivery, format_volume, volume_profile
+
+            deliv = fetch_delivery([d.date() for d in index_df.index[-10:]], [sym.upper()])
+            rep += "\n" + "\n".join(format_volume(volume_profile(raw[sym.upper()]), (deliv or {}).get(sym.upper()),
+                                                     deliv is not None))
             rep += "\n\n" + "\n".join(format_news(fetch_news(sym.upper(), names.get(sym.upper())), indent=""))
         reports.append(rep)
     text = "\n\n".join(reports)
@@ -319,6 +324,41 @@ def cmd_base_rates(args, settings) -> int:
     pd.set_option("display.width", 200)
     print(f"\n{len(events):,} cases -> {out}\n")
     print(table[table["band"] == "all"].to_string(index=False))
+    return 0
+
+
+def cmd_ml_test(args, settings) -> int:
+    """Upgrade 5: does machine learning beat the simple score on years it never saw?"""
+    from .base_rates import build_events
+    from .data import CachedData, load_full_universe, make_provider
+    from .ml import format_report, run_ml_test
+
+    cache_file = Path(settings.get("data.cache_dir", "data_cache")) / "ml_events.csv"
+    if args.reuse and cache_file.exists():
+        events = pd.read_csv(cache_file)
+        print(f"Re-using {len(events):,} saved cases from {cache_file}")
+    else:
+        uni = load_full_universe(settings)
+        bench = settings.get("regime.benchmark", "NIFTY50")
+        end = date.today()
+        days = (pd.Timestamp(end) - pd.Timestamp(args.start)).days + 600
+        loader = CachedData(make_provider(settings), settings.get("data.cache_dir", "data_cache"))
+        raw = loader.load(sorted(uni) + [bench], int(days / 1.5) + 1, end)
+        index_df = raw.pop(bench)
+        print(f"Building cases with features: {len(raw)} stocks, {args.start} -> {end}")
+        events = build_events(raw, index_df, settings, args.start, None, args.horizon, progress=True, features=True)
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        events.to_csv(cache_file, index=False)
+    res = run_ml_test(events, args.test_start, args.cost_pct)
+    text = format_report(res)
+    print("\n" + text)
+    out = Path(settings.get("signals.dir", "journal")) / "ml_report.txt"
+    out.write_text(text + "\n")
+    if args.send:
+        desk = _desk(settings)
+        if desk.n is not None and not desk.n.send(text):
+            print(f"ERROR: the {desk.n.provider} message was NOT delivered.")
+            return 3
     return 0
 
 
@@ -576,9 +616,21 @@ def cmd_signals(args, settings) -> int:
                 from .fundamentals import fetch_fundamentals
 
                 funda = {sym: fetch_fundamentals(sym) for sym in picks["symbol"]}
+            volume, delivery_ok = None, True
+            if tp.get("volume", True) and len(picks):
+                from .volume_quality import fetch_delivery, volume_profile
+
+                deliv = fetch_delivery([d.date() for d in index_df.index[-10:]], list(picks["symbol"]))
+                delivery_ok = deliv is not None
+                volume = {sym: {"profile": volume_profile(raw.get(sym)), "delivery": (deliv or {}).get(sym) or None}
+                          for sym in picks["symbol"]}
             text = format_picks(picks, track, regime_on, index_df.index[-1], int(tp.get("eval_days", 10)),
                                 float(settings.get("risk.max_stop_distance_pct", 8)),
-                                float(settings.get("initial_capital", 10000)), prof.max_position_pct, news, odds, funda)
+                                float(settings.get("initial_capital", 10000)), prof.max_position_pct, news, odds, funda,
+                                volume, delivery_ok)
+            from .mistakes import save_watchlist_state
+
+            save_watchlist_state(settings, picks, regime_on, index_df.index[-1])
             print("\n" + text)
             if not args.no_whatsapp and not notifier.send(text):
                 print(f"ERROR: the {notifier.provider} watchlist message was NOT delivered.")
@@ -602,24 +654,55 @@ def cmd_signals(args, settings) -> int:
     return 0
 
 
+def _send_feedback(desk, text: str, send: bool) -> int:
+    print("\n" + text)
+    if send and desk.n is not None and not desk.n.send(text):
+        print(f"ERROR: the {desk.n.provider} trade feedback was NOT delivered.")
+        return 3
+    return 0
+
+
 def cmd_took(args, settings) -> int:
+    from datetime import datetime
+
+    from .mistakes import append_log, check_buy, feedback, find_plan
     from .signals import SignalError
 
+    journal = Path(settings.get("signals.dir", "journal"))
+    desk = _desk(settings)
+    stop, target = args.stop, args.target
+    plan, _ = find_plan(journal, args.symbol)
+    if plan and (stop is None or target is None) and args.symbol.upper() not in desk.plans():
+        stop = plan["stop"] if stop is None else stop      # levels from the Top-5 watchlist
+        target = plan["t1"] if target is None else target
+    mistakes = check_buy(settings, journal, args.symbol, args.qty, args.price, stop, args.emotion, args.followed_plan)
     try:
-        p = _desk(settings).took(args.symbol, args.qty, args.price, args.stop, args.target)
+        p = desk.took(args.symbol, args.qty, args.price, stop, target)
     except SignalError as e:
         print(f"ERROR: {e}")
         return 1
     print(f"Recorded BUY {p.quantity} {p.symbol} @ ₹{p.entry_price:.2f} - stop ₹{p.stop_price:.2f}, target ₹{p.target_price:.2f}.\n"
           f"Make sure your GTT OCO (stop + target) is set in the app.")
-    return 0
+    append_log(journal, {"time": datetime.now().isoformat(timespec="seconds"), "action": "BUY", "symbol": p.symbol,
+                         "qty": p.quantity, "price": p.entry_price, "stop": p.stop_price, "target": p.target_price,
+                         "reason": args.reason or "", "emotion": args.emotion or "", "followed_plan": args.followed_plan or "",
+                         "pnl": "", "mistakes": " | ".join(mistakes)})
+    return _send_feedback(desk, feedback("BUY", p.symbol, p.quantity, p.entry_price, p.stop_price, p.target_price, mistakes),
+                          args.send)
 
 
 def cmd_sold(args, settings) -> int:
+    from datetime import datetime
+
+    from .mistakes import append_log, check_sell, feedback
     from .signals import SignalError
 
+    journal = Path(settings.get("signals.dir", "journal"))
+    desk = _desk(settings)
+    pos = next((p for p in desk.positions()[0] if p.symbol == args.symbol.upper()), None)
+    qty = args.qty if args.qty else (pos.quantity if pos else 0)
     try:
-        t = _desk(settings).sold(args.symbol, args.price, args.qty, args.reason or "manual sell")
+        t = desk.sold(args.symbol, args.price, args.qty, args.reason or "manual sell")
     except SignalError as e:
         print(f"ERROR: {e}")
         return 1
@@ -627,7 +710,22 @@ def cmd_sold(args, settings) -> int:
         print(f"Recorded SELL {t.symbol} @ ₹{t.exit_price:.2f}: P&L ₹{t.pnl:,.2f} ({t.r_multiple:+.2f}R)")
     else:
         print("Recorded partial sell.")
-    return 0
+    mistakes = check_sell(settings, args.symbol, args.price, pos.initial_stop, pos.target_price,
+                          str(pos.entry_date), args.emotion, args.followed_plan)
+    append_log(journal, {"time": datetime.now().isoformat(timespec="seconds"), "action": "SELL",
+                         "symbol": args.symbol.upper(), "qty": qty, "price": args.price, "stop": pos.initial_stop,
+                         "target": pos.target_price, "reason": args.reason or "", "emotion": args.emotion or "",
+                         "followed_plan": args.followed_plan or "", "pnl": t.pnl if t else "",
+                         "mistakes": " | ".join(mistakes)})
+    return _send_feedback(desk, feedback("SELL", args.symbol.upper(), qty, args.price, pos.initial_stop, pos.target_price,
+                                         mistakes, t.pnl if t else None), args.send)
+
+
+def cmd_weekly_review(args, settings) -> int:
+    from .mistakes import weekly_review
+
+    desk = _desk(settings)
+    return _send_feedback(desk, weekly_review(settings, Path(settings.get("signals.dir", "journal"))), args.send)
 
 
 def cmd_journal(args, settings) -> int:
@@ -685,6 +783,13 @@ def main(argv: list[str] | None = None) -> int:
     br.add_argument("--start", default="2015-01-01")
     br.add_argument("--end")
     br.add_argument("--horizon", type=int, default=20)
+    ml = sub.add_parser("ml-test", help="machine-learning out-of-sample test vs the simple score")
+    ml.add_argument("--start", default="2015-01-01")
+    ml.add_argument("--test-start", default="2023-01-01", help="train before this date, test from it")
+    ml.add_argument("--horizon", type=int, default=20)
+    ml.add_argument("--cost-pct", type=float, default=0.55, help="round-trip charges + slippage, %% of position")
+    ml.add_argument("--reuse", action="store_true", help="re-use data_cache/ml_events.csv if present")
+    ml.add_argument("--send", action="store_true")
     sg = sub.add_parser("signals", help="free mode: daily WhatsApp trade instructions")
     sg.add_argument("--no-whatsapp", action="store_true", help="only print")
     sg.add_argument("--engine", choices=["rotation", "swing"], help="rotation = Option B paper test (default)")
@@ -698,7 +803,13 @@ def main(argv: list[str] | None = None) -> int:
     sd.add_argument("symbol")
     sd.add_argument("price", type=float)
     sd.add_argument("--qty", type=int)
-    sd.add_argument("--reason")
+    for x in (tk, sd):
+        x.add_argument("--reason", help="why you traded, in a few words")
+        x.add_argument("--emotion", help="calm / confident / fomo / fear / greed / revenge / bored")
+        x.add_argument("--followed-plan", dest="followed_plan", help="yes / no")
+        x.add_argument("--send", action="store_true", help="send the mistake-check feedback to Telegram/WhatsApp")
+    wr = sub.add_parser("weekly-review", help="weekly discipline review of your recorded trades")
+    wr.add_argument("--send", action="store_true")
     sub.add_parser("journal", help="free mode: positions and stats")
     args = ap.parse_args(argv)
 
@@ -719,6 +830,7 @@ def main(argv: list[str] | None = None) -> int:
         "kill": cmd_kill, "resume": cmd_resume, "preflight": cmd_preflight, "kite-login-url": cmd_kite_login,
         "kite-login": cmd_kite_login, "update-universe": cmd_update_universe, "test-whatsapp": cmd_test_whatsapp,
         "analyze": cmd_analyze, "base-rates": cmd_base_rates, "research": cmd_research, "portfolio-research": cmd_portfolio_research, "signals": cmd_signals, "took": cmd_took, "sold": cmd_sold, "journal": cmd_journal,
+        "weekly-review": cmd_weekly_review, "ml-test": cmd_ml_test,
     }
     return handlers[args.cmd](args, settings)
 

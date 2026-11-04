@@ -24,6 +24,21 @@ on:
       target:
         description: "optional: override target (took only)"
         required: false
+      reason:
+        description: "why? e.g. 'watchlist breakout', 'stop hit', 'target hit'"
+        required: false
+      emotion:
+        description: "how did you feel? (honest answers make the weekly review useful)"
+        required: false
+        type: choice
+        default: calm
+        options: [calm, confident, fomo, fear, greed, revenge, bored]
+      followed_plan:
+        description: "did you follow the bot's plan?"
+        required: false
+        type: choice
+        default: "yes"
+        options: ["yes", "no"]
 
 permissions:
   contents: write
@@ -50,20 +65,31 @@ jobs:
           QTY: ${{ inputs.quantity }}
           STOP: ${{ inputs.stop }}
           TARGET: ${{ inputs.target }}
+          REASON: ${{ inputs.reason }}
+          EMOTION: ${{ inputs.emotion }}
+          FOLLOWED: ${{ inputs.followed_plan }}
+          WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE || vars.WHATSAPP_PHONE }}
+          CALLMEBOT_API_KEY: ${{ secrets.CALLMEBOT_API_KEY || vars.CALLMEBOT_API_KEY }}
+          NOTIFY_PROVIDER: ${{ vars.NOTIFY_PROVIDER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
         run: |
           set -e
+          COMMON=(--emotion "$EMOTION" --followed-plan "$FOLLOWED" --send)
+          [ -n "$REASON" ] && COMMON+=(--reason "$REASON")
           if [ "$ACTION" = "took" ]; then
             ARGS=("$SYMBOL" "$QTY" "$PRICE")
             [ -n "$STOP" ] && ARGS+=(--stop "$STOP")
             [ -n "$TARGET" ] && ARGS+=(--target "$TARGET")
-            python -m swingbot took "${ARGS[@]}"
+            python -m swingbot took "${ARGS[@]}" "${COMMON[@]}"
           else
             ARGS=("$SYMBOL" "$PRICE")
             [ -n "$QTY" ] && ARGS+=(--qty "$QTY")
-            python -m swingbot sold "${ARGS[@]}"
+            python -m swingbot sold "${ARGS[@]}" "${COMMON[@]}"
           fi
           python -m swingbot journal
       - name: Save journal
+        if: always()
         run: |
           git config user.name "swingbot"
           git config user.email "swingbot@users.noreply.github.com"

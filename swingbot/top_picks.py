@@ -145,9 +145,11 @@ def _news_line(check) -> list[str]:
 
 def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Timestamp, eval_days: int = 10,
                  max_stop_pct: float = 8.0, capital: float = 10_000, max_position_pct: float = 50.0,
-                 news: dict | None = None, odds: dict | None = None, fundamentals: dict | None = None) -> str:
+                 news: dict | None = None, odds: dict | None = None, fundamentals: dict | None = None,
+                 volume: dict | None = None, delivery_ok: bool = True) -> str:
     from .base_rates import format_odds
     from .fundamentals import format_fundamentals
+    from .volume_quality import format_volume
 
     num = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
     limit_rs = capital * max_position_pct / 100
@@ -177,6 +179,9 @@ def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Tim
         if r.trigger > limit_rs:
             L.append(f"⚠️ Capital Alert: 1 share costs approximately ₹{r.trigger:,.0f}. "
                      f"Exceeds ₹{limit_rs:,.0f} per-stock limit.")
+        if volume is not None and r.symbol in volume:
+            v = volume[r.symbol]
+            L += format_volume(v.get("profile"), v.get("delivery"), delivery_ok)
         if odds is not None:
             L += format_odds(odds.get(r.symbol))
         if fundamentals is not None:

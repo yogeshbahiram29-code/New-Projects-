@@ -1,0 +1,31 @@
+# Weekly discipline review of the trades you recorded (journal/trade_log.csv).
+# Runs every Saturday morning; also runnable by hand: Actions -> "Weekly review" -> Run workflow.
+name: Weekly review
+
+on:
+  schedule:
+    - cron: "45 3 * * 6"     # Saturday 09:15 IST
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install pandas numpy PyYAML requests
+      - name: Send weekly review
+        env:
+          WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE || vars.WHATSAPP_PHONE }}
+          CALLMEBOT_API_KEY: ${{ secrets.CALLMEBOT_API_KEY || vars.CALLMEBOT_API_KEY }}
+          NOTIFY_PROVIDER: ${{ vars.NOTIFY_PROVIDER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
+        run: python -m swingbot weekly-review --send

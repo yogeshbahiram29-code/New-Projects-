@@ -223,6 +223,7 @@ top_picks:
   odds: true                # historical odds of similar setups (journal/base_rates.csv, refreshed weekly)
   odds_min_cases: 100       # need at least this many past cases (else a broader group is used)
   fundamentals: true        # market cap, P/E, ROE, debt, profit growth + flags
+  volume: true              # volume quality: accumulation/distribution + NSE delivery % (best effort)
 
 dashboard:
   enabled: true             # daily market dashboard (trend, breadth, VIX, sectors, global cues)

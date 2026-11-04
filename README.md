@@ -62,9 +62,29 @@ To get a deep dive on any stock: GitHub → Actions → **Analyze stock** → ty
    - a plain "what it means" line
 2. 📁 **Option B paper portfolio**
 3. 📊 **Top 5 swing watchlist.** For each pick:
+   - 🔥 **volume quality:** today's volume vs its 50-day average, and a verdict of ACCUMULATION, NEUTRAL or DISTRIBUTION. The verdict combines four measures:
+     - Chaikin money flow
+     - strong up-days vs strong down-days
+     - the On-Balance Volume trend
+     - up-volume vs down-volume
+   - 📦 **delivery %** from NSE's daily bhavcopy, best effort. NSE often blocks cloud servers, and when it does the message says so instead of guessing.
    - 🎲 **historical odds:** how often similar past setups (same type, score band and market trend, NIFTY 500 since 2015) hit Target 1 before the stop
    - 🏢 **fundamentals:** market cap, P/E, ROE, D/E, profit growth, with flags
    - 📰 **news**
+
+**Mistake tracker.** Record every real trade with **Actions → Record trade** and fill in the optional *reason*, *emotion* and *followed plan* boxes. The bot checks the trade against its own rules and replies on Telegram with "📒 TRADE RECORDED" and a mistake check:
+- **Buy checks:** off-plan stock, market filter OFF, chased above the entry, bought before the trigger, no stop or too-wide stop, risk above 1%, oversized position, revenge trade, overtrading, emotional entry
+- **Sell checks:** stop not honoured, early exit out of fear, held too long
+
+Every Saturday the **Weekly review** workflow sends a discipline score, your most common mistakes and one focus for next week. Trades are logged in `journal/trade_log.csv`.
+
+**Machine-learning test (Upgrade 5).** Actions → **ML test** trains two simple models (logistic regression and small gradient-boosted trees) on 2015–2022. It then tests them on 2023 onwards, years the models never saw, and compares them with simply ranking by the bot's score, after charges. A model is used only if it passes all of these rules, which were written before the test:
+- AUC ≥ 0.55
+- its top-20% picks beat the score's top 20% by at least +0.10R
+- those picks are profitable after costs
+- its daily top-5 beats the score's daily top-5
+
+The report is saved to `journal/ml_report.txt`.
 
 The odds table (`journal/base_rates.csv`) is rebuilt every Saturday by the **Refresh odds** workflow. The odds are historical frequencies, not a prediction. They include today's-list survivorship bias and exclude charges.
 
@@ -123,7 +143,7 @@ NEW TRADES FOR NEXT SESSION
 3. **When it fills:** immediately set the **GTT OCO**, which holds the stop-loss and the target together. In Kite this is *GTT → OCO*.
 4. **Record the fill:**
    * **On a laptop:** `python -m swingbot took HAL 1 4225`
-   * **On a phone (GitHub setup):** GitHub app → Actions → *Record trade* → Run workflow
+   * **On a phone (GitHub setup):** GitHub app → Actions → *Record trade* → Run workflow. Answer the *emotion* and *followed plan* questions honestly; the mistake check and the weekly review depend on them.
 5. **Exits:**
    * Stop-loss and target exits happen by themselves through your GTT. The bot notices them from the price data and updates your journal.
    * When the message says **SELL at tomorrow's open** (trend break, time stop, results ahead), sell at market after 9:15. Then record it: `sold HAL <price>`.
@@ -348,6 +368,10 @@ journalctl -u swingbot -f
 | `python -m swingbot resume` | Turn trading back on after a kill or the 15% drawdown halt (asks you to confirm) |
 | `python -m swingbot preflight` | Read-only broker check |
 | `python -m swingbot job <name>` | Run one scheduled job now (for testing) |
+| `python -m swingbot took SYM QTY PRICE [--emotion fomo --followed-plan no --send]` | Record a buy plus the mistake check |
+| `python -m swingbot sold SYM PRICE [--reason "stop hit" --send]` | Record a sell plus the mistake check |
+| `python -m swingbot weekly-review [--send]` | Weekly discipline review |
+| `python -m swingbot ml-test [--send]` | Machine-learning out-of-sample test vs the simple score |
 
 ## Safety features
 
