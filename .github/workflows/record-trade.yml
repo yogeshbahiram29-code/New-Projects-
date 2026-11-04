@@ -69,6 +69,7 @@ jobs:
           git config user.email "swingbot@users.noreply.github.com"
           git add journal/
           git diff --cached --quiet || git commit -m "journal: $ACTION $SYMBOL"
+          git pull --rebase
           git push
         env:
           ACTION: ${{ inputs.action }}
