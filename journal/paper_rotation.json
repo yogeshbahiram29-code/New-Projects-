@@ -1,0 +1,20 @@
+{
+ "start_date": "2026-11-02",
+ "start_capital": 10000.0,
+ "start_nifty": 23440.80078125,
+ "cash": 10000.0,
+ "holdings": {},
+ "pending": {
+  "sells": [],
+  "buys": [],
+  "decided_on": "2026-10-30",
+  "regime_on": false
+ },
+ "last_decision_month": "2026-10",
+ "peak_equity": 10000.0,
+ "max_dd_pct": 0.0,
+ "closed": [],
+ "history": [],
+ "last_bar": "2026-11-02",
+ "last_message": "\u26a0\ufe0f PAPER TRADING ONLY - forward test of Option B (monthly momentum). No real orders.\n\nOPTION B PAPER PORTFOLIO - data to Mon 02 Nov 2026\nMarket filter: NIFTY 23,441 vs 200-day avg 24,028 (falling) -> OFF (cash)\nEquity \u20b910,000 (+0.0%) vs NIFTY +0.0% since 02 Nov 2026 | drawdown now 0.0%, worst 0.0%\nHoldings: none - all cash \u20b910,000\nNext open (paper): sell - | buy -\n\nToday:\n- Paper portfolio started with \u20b910,000 on 2026-11-02.\n- MONTH-END DECISION (start-up: latest month-end, 2026-10-30): regime OFF -> cash; sell nothing; buy nothing (at next open)\n\nForward-test scorecard (first review 31 Jan 2027):\n- \u2705 vs NIFTY: +0.0 points\n- \u2705 worst drawdown 0.0% (limit 20%)"
+}
