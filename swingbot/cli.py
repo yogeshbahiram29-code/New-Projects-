@@ -29,6 +29,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .config import ROOT, load_dotenv, load_settings
@@ -153,6 +154,71 @@ def cmd_research(args, settings) -> int:
     print(pd.DataFrame(rows).to_string(index=False))
     if bench_row:
         print(f"\nNIFTY 50 buy & hold same window: CAGR {bench_row.get('cagr_pct')}%, max drawdown {bench_row.get('max_drawdown_pct')}%")
+    return 0
+
+
+def cmd_portfolio_research(args, settings) -> int:
+    """Options B (monthly momentum rotation) and C (index trend), plus controls and benchmark."""
+    from . import metrics
+    from .costs import CostModel
+    from .data import CachedData, load_full_universe, make_provider
+    from .portfolio import backtest_index_trend, backtest_momentum_rotation, portfolio_trade_metrics
+
+    end = pd.Timestamp(args.end).date()
+    uni = load_full_universe(settings)
+    bench = settings.get("regime.benchmark", "NIFTY50")
+    days = (pd.Timestamp(end) - pd.Timestamp(args.start)).days + 1300
+    cache = CachedData(make_provider(settings), settings.get("data.cache_dir", "data_cache"))
+    raw = cache.load(sorted(uni) + [bench], int(days / 1.5) + 1, end)  # data physically ends at --end
+    index_df = raw.pop(bench)
+    costs = CostModel.from_settings(settings.section("costs"), args.costs)
+    ucfg = settings.section("universe")
+    print(f"Universe: {len(uni)} requested, {len(raw)} with data | test window {args.start} -> {end} | "
+          f"charges: {args.costs}, slippage {costs.slippage_pct}%/side")
+
+    runs = []
+    for cap in (1_000_000, 10_000):
+        for y in (0.0, 5.0):
+            runs.append((cap, backtest_index_trend(index_df, args.start, end, cap, costs, 10, y)))
+        for y in ((0.0, 5.0) if cap == 1_000_000 else (0.0,)):
+            runs.append((cap, backtest_momentum_rotation(raw, index_df, args.start, end, cap, costs,
+                                                         min_value_cr=float(ucfg.get("min_avg_traded_value_cr", 10)),
+                                                         min_price=float(ucfg.get("min_price", 50)), cash_yield_pct=y)))
+    controls = [backtest_momentum_rotation(raw, index_df, args.start, end, 1_000_000, costs, pick="random", seed=k,
+                                           min_value_cr=float(ucfg.get("min_avg_traded_value_cr", 10)))
+                for k in range(5)]
+
+    idx = index_df["close"].loc[pd.Timestamp(args.start): pd.Timestamp(end)]
+    bh = metrics.equity_metrics(idx / idx.iloc[0] * 1_000_000, 1_000_000)
+    rows = []
+    for cap, res in runs:
+        em = metrics.equity_metrics(res.equity, cap)
+        tm = portfolio_trade_metrics(res.trades)
+        rows.append({"strategy": res.name, "capital": cap, "cagr_pct": em.get("cagr_pct"),
+                     "max_dd_pct": em.get("max_drawdown_pct"), "sharpe": em.get("sharpe"), "mar": em.get("mar"),
+                     "trades": tm.get("trades"), "win_pct": tm.get("win_rate_pct"), "exp_rs": tm.get("expectancy_rs"),
+                     "exp_pct": tm.get("expectancy_pct"), "pf": tm.get("profit_factor"), "avg_days": tm.get("avg_days_held"),
+                     "lose_streak": tm.get("max_losing_streak"), "in_market_pct": res.exposure_pct,
+                     "final": em.get("final_equity")})
+    pd.set_option("display.width", 250)
+    print("\n" + "=" * 100 + "\nOPTIONS B & C - in-sample, after all charges\n" + "=" * 100)
+    print(pd.DataFrame(rows).to_string(index=False))
+    cc = [metrics.equity_metrics(c.equity, 1_000_000) for c in controls]
+    print(f"\nCONTROL - same rotation rules but RANDOM picks (5 runs, ₹10L, cash 0%): "
+          f"CAGR {min(x['cagr_pct'] for x in cc)}% .. {max(x['cagr_pct'] for x in cc)}% "
+          f"(mean {np.mean([x['cagr_pct'] for x in cc]):.2f}%), max DD mean {np.mean([x['max_drawdown_pct'] for x in cc]):.1f}%")
+    print(f"BENCHMARK - NIFTY 50 buy & hold (price index, no dividends): CAGR {bh['cagr_pct']}%, "
+          f"max DD {bh['max_drawdown_pct']}%, Sharpe {bh['sharpe']}, MAR {bh['mar']}")
+
+    print("\nYEAR BY YEAR (% return, ₹10L, cash 0%)")
+    table = {"NIFTY 50": metrics.yearly(idx)["return_pct"]}
+    for cap, res in runs:
+        if cap == 1_000_000 and "cash 0%" in res.name:
+            table[res.name.split(" (")[0].split(",")[0]] = metrics.yearly(res.equity)["return_pct"]
+    print(pd.DataFrame(table).to_string())
+    for cap, res in runs:
+        if res.notes and cap == 1_000_000:
+            print(f"\nNotes for {res.name}: " + "; ".join(res.notes))
     return 0
 
 
@@ -430,6 +496,10 @@ def main(argv: list[str] | None = None) -> int:
     rs.add_argument("--start", default="2015-01-01")
     rs.add_argument("--end", default="2022-12-31", help="data is cut here - keep later years for the final test")
     rs.add_argument("--costs", default="zerodha", choices=["zerodha", "groww", "paper"])
+    pr = sub.add_parser("portfolio-research", help="options B (momentum rotation) and C (index trend), in-sample")
+    pr.add_argument("--start", default="2015-01-01")
+    pr.add_argument("--end", default="2022-12-31")
+    pr.add_argument("--costs", default="zerodha", choices=["zerodha", "groww", "paper"])
     sg = sub.add_parser("signals", help="free mode: daily WhatsApp trade instructions")
     sg.add_argument("--no-whatsapp", action="store_true", help="only print")
     tk = sub.add_parser("took", help="free mode: record a buy")
@@ -462,7 +532,7 @@ def main(argv: list[str] | None = None) -> int:
         "backtest": cmd_backtest, "scan": cmd_scan, "run": cmd_run, "job": cmd_job, "status": cmd_status,
         "kill": cmd_kill, "resume": cmd_resume, "preflight": cmd_preflight, "kite-login-url": cmd_kite_login,
         "kite-login": cmd_kite_login, "update-universe": cmd_update_universe, "test-whatsapp": cmd_test_whatsapp,
-        "research": cmd_research, "signals": cmd_signals, "took": cmd_took, "sold": cmd_sold, "journal": cmd_journal,
+        "research": cmd_research, "portfolio-research": cmd_portfolio_research, "signals": cmd_signals, "took": cmd_took, "sold": cmd_sold, "journal": cmd_journal,
     }
     return handlers[args.cmd](args, settings)
 

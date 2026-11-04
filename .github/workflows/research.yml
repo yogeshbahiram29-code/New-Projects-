@@ -14,6 +14,11 @@ on:
         description: "last day of data loaded (keep 2023+ untouched until the final test)"
         default: "2022-12-31"
         required: true
+      kind:
+        description: "swing = swing-strategy variants; portfolio = options B (momentum rotation) and C (index trend)"
+        type: choice
+        options: [swing, portfolio]
+        default: swing
 
 permissions:
   contents: write   # to save the downloaded NIFTY 500 list (config/universe.csv)
@@ -42,7 +47,10 @@ jobs:
         shell: bash
         env:
           PYTHONWARNINGS: ignore
-        run: python -m swingbot research --start "${{ inputs.start }}" --end "${{ inputs.end }}" 2>&1 | grep -v "Pandas4Warning\|inplace\|whatsnew\|Failed download\|possibly delisted"
+        run: |
+          CMD=research
+          [ "${{ inputs.kind }}" = "portfolio" ] && CMD=portfolio-research
+          python -m swingbot $CMD --start "${{ inputs.start }}" --end "${{ inputs.end }}" 2>&1 | grep -v "Pandas4Warning\|inplace\|whatsnew\|Failed download\|possibly delisted"
       - name: Save universe list
         if: always()
         run: |

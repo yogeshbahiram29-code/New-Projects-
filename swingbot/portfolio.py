@@ -1,0 +1,261 @@
+"""Portfolio-style strategies (monthly decisions), tested with the same cost model.
+
+Option B - Monthly momentum rotation
+    On the last trading day of each month (signal on the close):
+      * eligible = liquid stock (20-day avg traded value >= X cr, price >= min,
+        >= 260 days of history) AND close > its 200-day SMA
+      * score    = average of 6-month (126 d) and 12-month (252 d) return
+      * regime   = NIFTY 50 close > its 200-day SMA and the SMA is rising;
+                   if off -> sell everything, stay in cash
+      * hold the top ``top_n`` (equal weight); keep a holding while it stays in
+        the top ``top_n * buffer`` (fewer needless trades)
+    Orders execute at the NEXT trading day's open (plus slippage). No per-stock
+    stop: risk is controlled by diversification and the regime filter.
+    ``pick="random"`` replaces the momentum ranking by a random choice among the
+    same eligible stocks - a control that shows how much of the result comes
+    from the universe itself (survivorship bias) rather than from momentum.
+
+Option C - Index trend (Faber 10-month rule)
+    On the last trading day of each month: if NIFTY 50 closes above its
+    10-month average of month-end closes, hold the index ETF next month,
+    otherwise hold cash. Executes at the next trading day's open.
+
+Cash can earn a yield (e.g. a liquid ETF); the base case assumes 0%.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+
+import numpy as np
+import pandas as pd
+
+from .costs import CostModel
+from .indicators import sma
+
+
+@dataclass
+class PortfolioResult:
+    name: str
+    equity: pd.Series
+    trades: list[dict] = field(default_factory=list)
+    exposure_pct: float = 0.0
+    rebalances: int = 0
+    notes: list[str] = field(default_factory=list)
+
+
+def month_end_days(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    s = pd.Series(index, index=index)
+    return pd.DatetimeIndex(s.groupby([index.year, index.month]).max().values)
+
+
+def _next_day(days: pd.DatetimeIndex, d: pd.Timestamp) -> pd.Timestamp | None:
+    i = days.searchsorted(d, side="right")
+    return days[i] if i < len(days) else None
+
+
+def _daily_rate(cash_yield_pct: float) -> float:
+    return (1 + cash_yield_pct / 100) ** (1 / 252) - 1
+
+
+# ---------------------------------------------------------------------------
+# Option C - index trend
+# ---------------------------------------------------------------------------
+def backtest_index_trend(index_df: pd.DataFrame, start, end, capital: float, costs: CostModel,
+                         sma_months: int = 10, cash_yield_pct: float = 0.0) -> PortfolioResult:
+    slip = costs.slippage_pct / 100
+    all_days = index_df.index
+    me = month_end_days(all_days)
+    me_close = index_df["close"].reindex(me)
+    me_sma = me_close.rolling(sma_months, min_periods=sma_months).mean()
+    want_in = {d: bool(c > m) for d, c, m in zip(me, me_close, me_sma) if not pd.isna(m)}  # decided at month-end close
+
+    days = all_days[(all_days >= pd.Timestamp(start)) & (all_days <= pd.Timestamp(end))]
+    me_set = set(me)
+    r = _daily_rate(cash_yield_pct)
+    cash, units, entry = capital, 0.0, None
+    eq, trades, in_days = {}, [], 0
+    pending = None  # "buy"/"sell" to execute at next open
+    for t in days:
+        o, c = float(index_df.at[t, "open"]), float(index_df.at[t, "close"])
+        if pending == "buy" and units == 0:
+            px = o * (1 + slip)
+            spend = cash / (1 + 0.003)  # leave room for charges
+            fee = costs.buy_cost(spend)
+            units = spend / px
+            cash -= spend + fee
+            entry = {"entry_date": t.date(), "entry_price": px, "cost_basis": spend + fee}
+        elif pending == "sell" and units > 0:
+            px = o * (1 - slip)
+            value = units * px
+            fee = costs.sell_cost(value)
+            cash += value - fee
+            pnl = value - fee - entry["cost_basis"]
+            trades.append({**entry, "exit_date": t.date(), "exit_price": px, "pnl": pnl,
+                           "ret_pct": pnl / entry["cost_basis"] * 100,
+                           "days": int(np.busday_count(entry["entry_date"], t.date()))})
+            units, entry = 0.0, None
+        pending = None
+        cash *= 1 + r
+        in_days += 1 if units > 0 else 0
+        eq[t] = cash + units * c
+        if t in me_set:
+            go = want_in.get(t, False)
+            if go and units == 0:
+                pending = "buy"
+            elif not go and units > 0:
+                pending = "sell"
+    if units > 0 and len(days):  # mark-to-market close-out (not a real trade)
+        t = days[-1]
+        value = units * float(index_df.at[t, "close"])
+        trades.append({**entry, "exit_date": t.date(), "exit_price": float(index_df.at[t, "close"]),
+                       "pnl": value - entry["cost_basis"], "ret_pct": (value / entry["cost_basis"] - 1) * 100,
+                       "days": int(np.busday_count(entry["entry_date"], t.date())), "open_at_end": True})
+    return PortfolioResult(f"C: index trend ({sma_months}-month avg, cash {cash_yield_pct:g}%)",
+                           pd.Series(eq, dtype=float), trades, round(in_days / max(len(days), 1) * 100, 1),
+                           notes=["tested on the NIFTY 50 price index as a stand-in for a NIFTY ETF (fractional units)"])
+
+
+# ---------------------------------------------------------------------------
+# Option B - momentum rotation
+# ---------------------------------------------------------------------------
+def _features(df: pd.DataFrame, min_value: float, min_price: float, min_hist: int) -> pd.DataFrame:
+    c = df["close"]
+    out = pd.DataFrame(index=df.index)
+    out["open"], out["close"] = df["open"], c
+    out["sma200"] = sma(c, 200)
+    tv = sma(c * df["volume"], 20)
+    n = np.arange(1, len(df) + 1)
+    out["eligible"] = (tv >= min_value) & (c >= min_price) & (n >= min_hist) & (c > out["sma200"])
+    out["score"] = 0.5 * (c / c.shift(126) - 1) + 0.5 * (c / c.shift(252) - 1)
+    return out
+
+
+def backtest_momentum_rotation(raw: dict[str, pd.DataFrame], index_df: pd.DataFrame, start, end, capital: float,
+                               costs: CostModel, top_n: int = 10, buffer: float = 2.0, min_value_cr: float = 10,
+                               min_price: float = 50, min_hist: int = 260, regime_sma: int = 200,
+                               cash_yield_pct: float = 0.0, pick: str = "momentum", seed: int = 0) -> PortfolioResult:
+    slip = costs.slippage_pct / 100
+    feats = {s: _features(df, min_value_cr * 1e7, min_price, min_hist) for s, df in raw.items() if len(df) > 0}
+    score = pd.DataFrame({s: f["score"].where(f["eligible"]) for s, f in feats.items()})
+    closes = pd.DataFrame({s: f["close"] for s, f in feats.items()})
+    opens = pd.DataFrame({s: f["open"] for s, f in feats.items()})
+
+    ic = index_df["close"]
+    im = sma(ic, regime_sma)
+    regime_on = ((ic > im) & (im > im.shift(20))).fillna(False)
+
+    all_days = index_df.index
+    days = all_days[(all_days >= pd.Timestamp(start)) & (all_days <= pd.Timestamp(end))]
+    closes = closes.reindex(all_days).ffill()
+    opens = opens.reindex(all_days)
+    me_set = set(month_end_days(all_days))
+    rng = np.random.default_rng(seed)
+    r = _daily_rate(cash_yield_pct)
+
+    cash = capital
+    holdings: dict[str, dict] = {}  # sym -> {qty, entry_date, entry_price, cost_basis}
+    pending_sells: list[str] = []
+    pending_buys: list[str] = []
+    eq, trades, in_days, rebalances = {}, [], 0, 0
+    last_seen = {s: f.index[-1] for s, f in feats.items()}
+    notes: list[str] = []
+
+    def sell(sym: str, t, px: float, why: str):
+        nonlocal cash
+        h = holdings.pop(sym)
+        value = h["qty"] * px
+        fee = costs.sell_cost(value)
+        cash += value - fee
+        pnl = value - fee - h["cost_basis"]
+        trades.append({"symbol": sym, "entry_date": h["entry_date"], "entry_price": h["entry_price"],
+                       "exit_date": t.date(), "exit_price": px, "pnl": pnl, "ret_pct": pnl / h["cost_basis"] * 100,
+                       "days": int(np.busday_count(h["entry_date"], t.date())), "exit_reason": why})
+
+    for t in days:
+        # 1) execute last month-end's decisions at today's open
+        if pending_sells or pending_buys:
+            for sym in list(pending_sells):
+                o = opens.at[t, sym] if sym in opens.columns else np.nan
+                if sym in holdings and not pd.isna(o):
+                    sell(sym, t, float(o) * (1 - slip), "rebalance")
+                    pending_sells.remove(sym)
+            equity_now = cash + sum(h["qty"] * float(closes.at[t, s]) for s, h in holdings.items())
+            slot = equity_now / top_n
+            for sym in list(pending_buys):
+                o = opens.at[t, sym]
+                if pd.isna(o) or sym in holdings:
+                    pending_buys.remove(sym)
+                    continue
+                px = float(o) * (1 + slip)
+                budget = min(slot, cash / 1.003)
+                qty = math.floor(budget / px)
+                if qty < 1:
+                    pending_buys.remove(sym)
+                    continue
+                fee = costs.buy_cost(qty * px)
+                cash -= qty * px + fee
+                holdings[sym] = {"qty": qty, "entry_date": t.date(), "entry_price": px, "cost_basis": qty * px + fee}
+                pending_buys.remove(sym)
+            pending_sells, pending_buys = [], []
+
+        # 2) a stock whose data ended (delisted/merged) is closed at its last price
+        for sym in [s for s in holdings if last_seen[s] < t]:
+            sell(sym, t, float(closes.at[t, sym]), "data ended (delisted/merged)")
+            notes.append(f"{sym}: data ended {last_seen[sym].date()}, closed at last price")
+
+        cash *= 1 + r
+        mtm = cash + sum(h["qty"] * float(closes.at[t, s]) for s, h in holdings.items())
+        eq[t] = mtm
+        in_days += 1 if holdings else 0
+
+        # 3) month-end decision on the close
+        if t in me_set:
+            rebalances += 1
+            if not regime_on.at[t]:
+                pending_sells = list(holdings)
+                continue
+            row = score.loc[t].dropna() if t in score.index else pd.Series(dtype=float)
+            if pick == "random":
+                order = list(rng.permutation(row.index.to_numpy()))
+            else:
+                order = list(row.sort_values(ascending=False).index)
+            keep_zone = set(order[: int(top_n * buffer)])
+            keep = [s for s in holdings if s in keep_zone]
+            pending_sells = [s for s in holdings if s not in keep_zone]
+            pending_buys = [s for s in order if s not in holdings][: max(top_n - len(keep), 0)]
+
+    if holdings and len(days):  # mark-to-market close-out at the end (not real trades)
+        t = days[-1]
+        for sym in list(holdings):
+            sell(sym, t, float(closes.at[t, sym]), "end of test")
+    label = "momentum top" if pick == "momentum" else "RANDOM picks (control)"
+    return PortfolioResult(f"B: {label} {top_n}, cash {cash_yield_pct:g}%", pd.Series(eq, dtype=float), trades,
+                           round(in_days / max(len(days), 1) * 100, 1), rebalances, sorted(set(notes))[:10])
+
+
+# ---------------------------------------------------------------------------
+# metrics for portfolio strategies
+# ---------------------------------------------------------------------------
+def portfolio_trade_metrics(trades: list[dict]) -> dict:
+    real = [t for t in trades if t.get("exit_reason") not in ("end of test",) and not t.get("open_at_end")]
+    if not real:
+        return {"trades": 0}
+    pnl = np.array([t["pnl"] for t in real])
+    ret = np.array([t["ret_pct"] for t in real])
+    wins, losses = pnl[pnl > 0], pnl[pnl <= 0]
+    streak = worst = 0
+    for p in pnl:
+        streak = streak + 1 if p <= 0 else 0
+        worst = max(worst, streak)
+    return {
+        "trades": len(real),
+        "win_rate_pct": round(len(wins) / len(real) * 100, 1),
+        "avg_win_rs": round(float(wins.mean()), 0) if len(wins) else 0.0,
+        "avg_loss_rs": round(float(losses.mean()), 0) if len(losses) else 0.0,
+        "expectancy_rs": round(float(pnl.mean()), 0),
+        "expectancy_pct": round(float(ret.mean()), 2),
+        "profit_factor": round(float(wins.sum() / -losses.sum()), 2) if len(losses) and losses.sum() < 0 else float("inf"),
+        "avg_days_held": round(float(np.mean([t["days"] for t in real])), 0),
+        "max_losing_streak": int(worst),
+    }
