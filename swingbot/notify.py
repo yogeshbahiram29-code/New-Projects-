@@ -117,7 +117,7 @@ class Notifier:
         return False
 
     def send(self, text: str, urgent: bool = False) -> bool:
-        prefix = "🚨 SwingBot ALERT: " if urgent else "🤖 "
+        prefix = "🚨 SwingBot ALERT: " if urgent else ("" if text.startswith("🤖") else "🤖 ")
         text = f"{prefix}{text}"
         with open(self.log_path, "a", encoding="utf-8") as fh:
             fh.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {text}\n")

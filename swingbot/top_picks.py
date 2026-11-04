@@ -114,43 +114,100 @@ def record_and_evaluate(picks: pd.DataFrame, raw: dict[str, pd.DataFrame], index
     return out
 
 
+SECTOR_SHORT = {
+    "Oil Gas & Consumable Fuels": "Oil & Gas",
+    "Automobile and Auto Components": "Auto Components",
+    "Fast Moving Consumer Goods": "FMCG",
+    "Media Entertainment & Publication": "Media",
+    "Telecommunication": "Telecom",
+}
+
+FLAG_TEXT = {
+    "📅 results/board meeting": "Results / Board Meeting Date",
+    "⚠️ regulatory/legal": "Regulatory / Legal News",
+    "⚠️ rating/management": "Rating / Management / Promoter Activity",
+    "🔔 corporate action": "Corporate Action (Bonus / Split / Dividend)",
+    "✅ positive": "Positive News (Order Win / Upgrade)",
+}
+
+LINE = "━━━━━━━━━━━━━━━━━━"
+
+
+def ordinal(n: float) -> str:
+    n = int(round(n))
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _news_line(check) -> list[str]:
+    if check is None:
+        return []
+    if not check.ok:
+        return ["📰 News: Could not fetch – check NSE/BSE announcements before deciding."]
+    if not check.items:
+        return ["📰 News: No major news in the last 7 days."]
+    heads = []
+    for it in check.items[:2]:
+        t = it.title.split(" | ")[0].strip()
+        heads.append(t if len(t) <= 80 else t[:77].rstrip() + "...")
+    out = ["📰 News: " + "; ".join(heads) + "."]
+    if check.flags:
+        out.append("🚩 Check: " + "; ".join(FLAG_TEXT.get(f, f) for f in check.flags) + ".")
+    return out
+
+
 def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Timestamp, eval_days: int = 10,
                  max_stop_pct: float = 8.0, capital: float = 10_000, max_position_pct: float = 50.0,
                  news: dict | None = None) -> str:
-    from .news import format_news
-
     num = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
-    L = [f"📊 TOP 5 SWING WATCHLIST · {when:%a %d %b %Y}",
-         ("🟢 Market: UPTREND - setups allowed (paper)" if regime_on
-          else "🔴 Market: DOWNTREND - watch only, don't buy today"),
-         "🧪 Paper/learning only - not validated for real money", ""]
+    limit_rs = capital * max_position_pct / 100
+    L = ["🤖 TOP 5 SWING TRADING WATCHLIST", f"📅 {when:%A, %d %B %Y}", "", LINE,
+         "📈 MARKET OUTLOOK" if regime_on else "📉 MARKET OUTLOOK"]
+    if regime_on:
+        L += ["🟢 Market Trend: UPTREND", "✅ Strategy: SETUPS ALLOWED (PAPER ONLY)"]
+    else:
+        L += ["🔴 Market Trend: DOWNTREND", "⚠️ Strategy: WATCH ONLY – NO FRESH BUYING"]
+    L += ["🧪 Paper Trading / Learning Purpose Only", LINE, ""]
     if picks.empty:
-        L.append("No stock passes the trend filters today. Cash is a position. 💤")
+        L += ["💤 No stock passes the trend filters today. Cash is a position.", ""]
     for i, r in enumerate(picks.itertuples(index=False)):
         tag = num[i] if i < len(num) else f"{i + 1})"
-        L.append(f"{tag} {r.symbol} · {r.sector}")
-        L.append(f"   ⭐ Score {r.score:.0f}/100 · strength {r.rs_pct:.0f}th pct · 6M {r.ret_6m_pct:+.0f}%")
-        L.append(f"   💰 Price ₹{r.close:,.2f} · setup: {r.setup}")
-        L.append(f"   🟢 Buy above ₹{r.trigger:,.2f}")
-        L.append(f"   🔴 Stop-loss ₹{r.stop:,.2f} (-{r.stop_pct}%)")
-        L.append(f"   🎯 Target 1 ₹{r.t1:,.2f} (+{r.t1_pct}%) · Target 2 ₹{r.t2:,.2f} (+{r.t2_pct}%)")
-        flags = []
-        if r.stop_pct > max_stop_pct:
-            flags.append(f"stop wider than the {max_stop_pct:g}% rule - bot would skip")
-        if r.trigger > capital * max_position_pct / 100:
-            flags.append(f"1 share > ₹{capital * max_position_pct / 100:,.0f} limit for a ₹{capital:,.0f} account")
-        if flags:
-            L.append("   ⚠️ " + "; ".join(flags))
-        if news and r.symbol in news:
-            L += format_news(news[r.symbol])
+        L.append(f"{tag} {r.symbol} | {SECTOR_SHORT.get(r.sector, r.sector)}")
+        L.append(f"⭐ Score: {r.score:.0f}/100 | Strength: {ordinal(r.rs_pct)} Percentile")
+        L.append(f"📈 6M Performance: {r.ret_6m_pct:+.0f}%")
+        L.append(f"💰 CMP: ₹{r.close:,.2f} | Setup: {str(r.setup).capitalize()}")
         L.append("")
+        L.append(f"🟢 Entry Above: ₹{r.trigger:,.2f}")
+        L.append(f"🔴 Stop-Loss: ₹{r.stop:,.2f} (-{r.stop_pct}%)")
+        L.append(f"🎯 Target 1: ₹{r.t1:,.2f} (+{r.t1_pct}%)")
+        L.append(f"🎯 Target 2: ₹{r.t2:,.2f} (+{r.t2_pct}%)")
+        L.append("")
+        if r.stop_pct > max_stop_pct:
+            L.append(f"⚠️ SL exceeds {max_stop_pct:g}% risk rule – SKIP.")
+        if r.trigger > limit_rs:
+            L.append(f"⚠️ Capital Alert: 1 share costs approximately ₹{r.trigger:,.0f}. "
+                     f"Exceeds ₹{limit_rs:,.0f} per-stock limit.")
+        L += _news_line((news or {}).get(r.symbol))
+        L.append("")
+    L += [LINE, "📊 REPORT CARD"]
     if track.get("evaluated"):
-        L.append(f"📈 Report card ({track['evaluated']} past picks, {eval_days}-day return): avg {track['avg_pct']:+.2f}% "
-                 f"vs NIFTY {track['nifty_avg_pct']:+.2f}% · {track['positive_pct']:.0f}% up · "
-                 f"{track['beat_nifty_pct']:.0f}% beat NIFTY")
+        L += [f"📈 Avg {eval_days}-day return of past picks: {track['avg_pct']:+.2f}% vs NIFTY {track['nifty_avg_pct']:+.2f}%",
+              f"✅ Went up: {track['positive_pct']:.0f}% | Beat NIFTY: {track['beat_nifty_pct']:.0f}% "
+              f"({track['evaluated']} picks checked)"]
     else:
-        L.append(f"📈 Report card: starts once the first lists are {eval_days} trading days old "
-                 f"({track.get('lists', 0)} saved so far)")
-    L.append("✅ Before any decision: read the news, check results dates, never skip the stop-loss.")
-    L.append("🔎 Deep dive: GitHub → Actions → Analyze stock")
+        L.append(f"📅 Performance tracking starts after the first watchlist completes {eval_days} trading days.")
+    L += [f"📌 Saved Watchlists: {track.get('lists', 0)}", "",
+          "✅ PRE-TRADE CHECKLIST",
+          "• Read latest company news.",
+          "• Verify upcoming results / board meeting dates.",
+          "• Confirm breakout and volume.",
+          "• Check entry price before execution.",
+          "• Never skip stop-loss.",
+          f"• Follow maximum {max_stop_pct:g}% stop-loss rule.",
+          f"• Respect ₹{limit_rs:,.0f} per-stock capital limit.", "",
+          "⚠️ IMPORTANT DISCLAIMER",
+          "This is an experimental watchlist for paper trading and learning. Scores and setups are not "
+          "independently validated. No guaranteed returns. Avoid real-money trades based solely on this report.", "",
+          "🔎 DEEP DIVE", "GitHub → Actions → Analyze Stock", "",
+          LINE, "📊 Discipline First | Capital Protection Always."]
     return "\n".join(L)
