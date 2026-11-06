@@ -50,6 +50,57 @@
      "t2": 2158.62
     }
    ]
+  },
+  {
+   "date": "2026-11-06",
+   "regime_on": false,
+   "picks": [
+    {
+     "symbol": "ICICIBANK",
+     "setup": "breakout",
+     "score": 84.7,
+     "trigger": 1572.77,
+     "stop": 1496.35,
+     "t1": 1725.61,
+     "t2": 1802.03
+    },
+    {
+     "symbol": "SHYAMMETL",
+     "setup": "breakout",
+     "score": 84.0,
+     "trigger": 1306.3,
+     "stop": 1235.26,
+     "t1": 1448.38,
+     "t2": 1519.43
+    },
+    {
+     "symbol": "DIVISLAB",
+     "setup": "breakout",
+     "score": 81.2,
+     "trigger": 10330.82,
+     "stop": 9980.94,
+     "t1": 11030.58,
+     "t2": 11380.46
+    },
+    {
+     "symbol": "MRPL",
+     "setup": "pullback",
+     "score": 77.5,
+     "trigger": 177.08,
+     "stop": 167.65,
+     "t1": 195.94,
+     "t2": 205.37
+    },
+    {
+     "symbol": "SUNTV",
+     "setup": "pullback",
+     "score": 76.5,
+     "trigger": 607.31,
+     "stop": 576.25,
+     "t1": 669.43,
+     "t2": 700.49
+    }
+   ]
   }
  ]
 }
