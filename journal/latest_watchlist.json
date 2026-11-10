@@ -101,6 +101,57 @@
      "t2": 700.49
     }
    ]
+  },
+  {
+   "date": "2026-11-09",
+   "regime_on": false,
+   "picks": [
+    {
+     "symbol": "AUROPHARMA",
+     "setup": "breakout",
+     "score": 85.1,
+     "trigger": 1857.96,
+     "stop": 1789.49,
+     "t1": 1994.9,
+     "t2": 2063.37
+    },
+    {
+     "symbol": "UNIONBANK",
+     "setup": "breakout",
+     "score": 83.7,
+     "trigger": 197.25,
+     "stop": 185.53,
+     "t1": 220.69,
+     "t2": 232.41
+    },
+    {
+     "symbol": "GLAND",
+     "setup": "breakout",
+     "score": 83.0,
+     "trigger": 3377.37,
+     "stop": 3114.16,
+     "t1": 3903.79,
+     "t2": 4167.01
+    },
+    {
+     "symbol": "ICICIBANK",
+     "setup": "breakout",
+     "score": 82.2,
+     "trigger": 1593.59,
+     "stop": 1561.46,
+     "t1": 1657.85,
+     "t2": 1689.98
+    },
+    {
+     "symbol": "SUNTV",
+     "setup": "pullback",
+     "score": 79.8,
+     "trigger": 618.37,
+     "stop": 576.33,
+     "t1": 702.45,
+     "t2": 744.49
+    }
+   ]
   }
  ]
 }
