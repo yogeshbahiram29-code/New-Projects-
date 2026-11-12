@@ -34,8 +34,13 @@
    "2026-11-09",
    10000.0,
    25044.65
+  ],
+  [
+   "2026-11-11",
+   10000.0,
+   25255.05
   ]
  ],
- "last_bar": "2026-11-09",
- "last_message": "\ud83d\udcc1 OPTION B PAPER PORTFOLIO \u00b7 Mon 09 Nov 2026\n\ud83e\uddea Paper test of the monthly momentum strategy - no real orders\n\n\ud83d\udd34 Market: DOWNTREND - NIFTY 25,045 below its falling 200-day avg 23,996 -> stay in cash\n\ud83d\udcbc Value \u20b910,000 (+0.0%) \u00b7 NIFTY +6.8% since 02 Nov\n\ud83d\udcc9 Drop from peak: now 0.0% \u00b7 worst 0.0% (limit 20%)\n\n\ud83d\udce6 Holdings: none - 100% cash (\u20b910,000) \ud83d\udca4\n\n\ud83c\udfc1 Scorecard (first review 31 Jan 2027):\n   \u274c vs NIFTY: -6.8 points\n   \u2705 worst drop 0.0% (limit 20%)"
+ "last_bar": "2026-11-11",
+ "last_message": "\ud83d\udcc1 OPTION B PAPER PORTFOLIO \u00b7 Wed 11 Nov 2026\n\ud83e\uddea Paper test of the monthly momentum strategy - no real orders\n\n\ud83d\udd34 Market: DOWNTREND - NIFTY 25,255 below its falling 200-day avg 23,994 -> stay in cash\n\ud83d\udcbc Value \u20b910,000 (+0.0%) \u00b7 NIFTY +7.7% since 02 Nov\n\ud83d\udcc9 Drop from peak: now 0.0% \u00b7 worst 0.0% (limit 20%)\n\n\ud83d\udce6 Holdings: none - 100% cash (\u20b910,000) \ud83d\udca4\n\n\ud83c\udfc1 Scorecard (first review 31 Jan 2027):\n   \u274c vs NIFTY: -7.7 points\n   \u2705 worst drop 0.0% (limit 20%)"
 }

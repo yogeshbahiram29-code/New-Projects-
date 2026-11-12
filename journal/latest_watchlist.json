@@ -152,6 +152,57 @@
      "t2": 744.49
     }
    ]
+  },
+  {
+   "date": "2026-11-11",
+   "regime_on": false,
+   "picks": [
+    {
+     "symbol": "UNIONBANK",
+     "setup": "breakout",
+     "score": 87.5,
+     "trigger": 202.39,
+     "stop": 195.83,
+     "t1": 215.51,
+     "t2": 222.08
+    },
+    {
+     "symbol": "PETRONET",
+     "setup": "breakout",
+     "score": 86.1,
+     "trigger": 330.23,
+     "stop": 320.06,
+     "t1": 350.57,
+     "t2": 360.74
+    },
+    {
+     "symbol": "MRPL",
+     "setup": "pullback",
+     "score": 81.2,
+     "trigger": 180.18,
+     "stop": 168.23,
+     "t1": 204.08,
+     "t2": 216.03
+    },
+    {
+     "symbol": "CEMPRO",
+     "setup": "pullback",
+     "score": 70.9,
+     "trigger": 1340.24,
+     "stop": 1224.02,
+     "t1": 1572.68,
+     "t2": 1688.9
+    },
+    {
+     "symbol": "NYKAA",
+     "setup": "pullback",
+     "score": 70.7,
+     "trigger": 362.31,
+     "stop": 341.8,
+     "t1": 403.33,
+     "t2": 423.85
+    }
+   ]
   }
  ]
 }
