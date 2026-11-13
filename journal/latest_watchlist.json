@@ -203,6 +203,57 @@
      "t2": 423.85
     }
    ]
+  },
+  {
+   "date": "2026-11-12",
+   "regime_on": false,
+   "picks": [
+    {
+     "symbol": "COFORGE",
+     "setup": "pullback",
+     "score": 82.7,
+     "trigger": 2041.04,
+     "stop": 1966.08,
+     "t1": 2190.96,
+     "t2": 2265.92
+    },
+    {
+     "symbol": "TECHM",
+     "setup": "pullback",
+     "score": 81.7,
+     "trigger": 1791.79,
+     "stop": 1743.48,
+     "t1": 1888.41,
+     "t2": 1936.72
+    },
+    {
+     "symbol": "LGEINDIA",
+     "setup": "pullback",
+     "score": 74.3,
+     "trigger": 1759.46,
+     "stop": 1706.9,
+     "t1": 1864.58,
+     "t2": 1917.14
+    },
+    {
+     "symbol": "CEMPRO",
+     "setup": "pullback",
+     "score": 73.7,
+     "trigger": 1338.34,
+     "stop": 1224.79,
+     "t1": 1565.44,
+     "t2": 1678.99
+    },
+    {
+     "symbol": "MRPL",
+     "setup": "pullback",
+     "score": 69.4,
+     "trigger": 179.57,
+     "stop": 168.32,
+     "t1": 202.07,
+     "t2": 213.32
+    }
+   ]
   }
  ]
 }
