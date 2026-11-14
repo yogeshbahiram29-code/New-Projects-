@@ -8,7 +8,7 @@ import pytest
 from swingbot import notify
 from swingbot.news import NewsCheck, NewsItem
 from swingbot.notify import Notifier
-from swingbot.tgfmt import WIDTH, Html, pack, plain, split_html, whatsapp
+from swingbot.tgfmt import WIDTH, Html, disp_width, pack, plain, split_html, whatsapp
 
 
 def _pre_lines(msg: str) -> list[str]:
@@ -51,7 +51,8 @@ def test_watchlist_fits_phone_and_splits_between_cards():
     assert len(parts) >= 2 and all(isinstance(p, Html) and len(p) <= 3500 for p in parts)
     for p in parts:
         assert p.count("<pre>") == p.count("</pre>")  # no table cut in half
-        assert all(len(line) <= WIDTH for line in _pre_lines(p)), [x for x in _pre_lines(p) if len(x) > WIDTH]
+        assert all(disp_width(ln) <= WIDTH for ln in _pre_lines(p)), [x for x in _pre_lines(p) if disp_width(x) > WIDTH]
+        assert p.count("<blockquote") == p.count("</blockquote>")
     text = plain(parts)
     assert "&lt;" not in text and "<very>" in text  # headlines are escaped for Telegram, readable in plain text
     assert text.count("FINAL DECISION: SKIP") == 5  # 1 share > ₹5,000 limit
@@ -74,9 +75,10 @@ def test_tracker_and_dashboard_fit_phone():
     fake = idx.iloc[-60:].copy()
     dash = market_dashboard(stocks, idx, sectors, {"INDIAVIX": fake.assign(close=22.0), "SP500": fake})
     for m in list(msgs) + [dash]:
-        assert all(len(line) <= WIDTH for line in _pre_lines(m)), [x for x in _pre_lines(m) if len(x) > WIDTH]
+        assert all(disp_width(ln) <= WIDTH for ln in _pre_lines(m)), [x for x in _pre_lines(m) if disp_width(x) > WIDTH]
     t = plain(msgs)
-    assert "HIGH · test alert" in t and "BAJAJFINSV" in t and "119,097.35 → 131,266.25" in t
+    assert "🔴 HIGH · test alert" in t and "BAJAJFINSV" in t and "🔴 119,097.35 → 131,266.25" in t
+    assert "🔴 BAJAJFINSV SL hit -1.6R gap" in t
 
 
 def test_split_never_inside_pre_and_pack():
@@ -90,6 +92,8 @@ def test_split_never_inside_pre_and_pack():
 def test_whatsapp_and_plain_conversion():
     m = Html("<b>TITLE</b>\n<pre>Entry  ₹1&lt;2</pre>\n<i>tag</i>")
     assert whatsapp(m) == "*TITLE*\n```\nEntry  ₹1<2\n```\n_tag_" and plain(m) == "TITLE\nEntry  ₹1<2\ntag"
+    q = Html("<blockquote expandable>a\nb</blockquote>")
+    assert whatsapp(q) == "> a\n> b" and plain(q) == "a\nb"
     assert plain("not html <b>") == "not html <b>"
 
 

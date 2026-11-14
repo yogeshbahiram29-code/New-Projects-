@@ -52,7 +52,7 @@ def test_real_signal_is_found_and_adopted():
 
     from swingbot.tgfmt import plain
 
-    assert re.search(r"^ADOPT$", plain(format_report(res)), re.M)
+    assert re.search(r"^🟢 ADOPT$", plain(format_report(res)), re.M)
 
 
 def test_daily_top_counts_only_triggered():

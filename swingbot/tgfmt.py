@@ -12,6 +12,7 @@ from __future__ import annotations
 import html
 import math
 import re
+import unicodedata
 
 WIDTH = 32          # max characters per aligned (monospace) line
 LIMIT = 3500        # safety margin under Telegram's 4096-character message limit
@@ -21,6 +22,29 @@ TAGLINE = "<i>Discipline first. Capital protection always.</i>"
 
 class Html(str):
     """Text that is already Telegram HTML (sent with parse_mode=HTML)."""
+
+
+# Colour: Telegram bots can't colour text, so colour comes from status dots and quote blocks.
+GREEN, RED, YELLOW, BLUE, WHITE = "🟢", "🔴", "🟡", "🔵", "⚪"
+
+
+def dot(x, invert: bool = False, zero=WHITE) -> str:
+    """Green for up/positive, red for down/negative (inverted for things like VIX)."""
+    if isnan(x):
+        return WHITE
+    v = -float(x) if invert else float(x)
+    return GREEN if v > 0 else RED if v < 0 else zero
+
+
+def quote(body: str, expandable: bool = False) -> str:
+    """Telegram quote block (coloured accent bar). ``body`` must already be escaped HTML."""
+    return f"<blockquote{' expandable' if expandable else ''}>{body}</blockquote>"
+
+
+def disp_width(text: str) -> int:
+    """Columns a line takes on screen (emoji / wide characters count as 2)."""
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 0 if unicodedata.combining(ch) else 1
+               for ch in text if ch not in "\ufe0f\u200d")
 
 
 def esc(x) -> str:
@@ -42,7 +66,7 @@ def title(name: str, sub: str | None = None) -> str:
 
 def pre(lines: list[str]) -> str:
     """Monospace block (aligned columns)."""
-    return "<pre>" + esc("\n".join(lines)) + "</pre>"
+    return "<pre>" + esc("\n".join(ln.rstrip() for ln in lines)) + "</pre>"
 
 
 def kv(rows: list[tuple[str, str]], w: int = 12) -> str:
@@ -115,14 +139,18 @@ def pack(blocks: list[str], limit: int = LIMIT) -> list[Html]:
     return parts
 
 
+def _depth(t: str) -> int:
+    return (t.count("<pre>") - t.count("</pre>")) + (t.count("<blockquote") - t.count("</blockquote>"))
+
+
 def split_html(text: str, limit: int = LIMIT) -> list[str]:
-    """Split an over-long message at blank lines that are not inside a <pre> block."""
+    """Split an over-long message at blank lines that are not inside a <pre> or quote block."""
     if len(text) <= limit:
         return [text]
     chunks, cur, depth = [], [], 0
     for para in text.split("\n\n"):
         depth_before = depth
-        depth += para.count("<pre>") - para.count("</pre>")
+        depth += _depth(para)
         if cur and depth_before == 0 and len("\n\n".join(cur + [para])) > limit:
             chunks.append("\n\n".join(cur))
             cur = []
@@ -137,6 +165,8 @@ def split_html(text: str, limit: int = LIMIT) -> list[str]:
             head_, c = c[:cut], c[cut:].lstrip("\n")
             if head_.count("<pre>") > head_.count("</pre>"):
                 head_, c = head_ + "</pre>", "<pre>" + c
+            if head_.count("<blockquote") > head_.count("</blockquote>"):
+                head_, c = head_ + "</blockquote>", "<blockquote>" + c
             out.append(head_)
         out.append(c)
     return out
@@ -149,7 +179,7 @@ def plain(text) -> str:
         return "\n\n".join(plain(t) for t in text)
     if not isinstance(text, Html):
         return str(text)
-    t = re.sub(r"</?(b|i|u|s|code|pre)>", "", text)
+    t = re.sub(r"</?(b|i|u|s|code|pre|blockquote)( expandable)?>", "", text)
     return html.unescape(t)
 
 
@@ -157,12 +187,14 @@ def whatsapp(text: str) -> str:
     """WhatsApp markup version of a Telegram HTML message."""
     if not isinstance(text, Html):
         return str(text)
-    t = text.replace("<pre>", "```\n").replace("</pre>", "\n```")
+    t = re.sub(r"<blockquote( expandable)?>(.*?)</blockquote>",
+               lambda m: "\n".join("> " + ln for ln in m.group(2).split("\n")), text, flags=re.S)
+    t = t.replace("<pre>", "```\n").replace("</pre>", "\n```")
     t = re.sub(r"</?b>", "*", t)
     t = re.sub(r"</?i>", "_", t)
     t = re.sub(r"</?(u|s|code)>", "", t)
     return html.unescape(t)
 
 
-__all__ = ["Html", "esc", "bold", "head", "title", "pre", "kv", "lines", "inr", "num", "pct", "short", "pack",
+__all__ = ["GREEN", "RED", "YELLOW", "BLUE", "WHITE", "dot", "quote", "disp_width", "Html", "esc", "bold", "head", "title", "pre", "kv", "lines", "inr", "num", "pct", "short", "pack",
            "split_html", "plain", "whatsapp", "sector_name", "SECTOR_SHORT", "SEP", "TAGLINE", "WIDTH", "LIMIT", "date_line"]

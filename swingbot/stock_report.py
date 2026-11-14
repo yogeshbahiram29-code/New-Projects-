@@ -15,7 +15,7 @@ from .indicators import find_resistance
 from .portfolio import month_end_days, rotation_inputs
 from .setups import find_setup
 from .strategies import MomentumStrategy
-from .tgfmt import Html, esc, head, kv, pre, title
+from .tgfmt import GREEN, RED, Html, esc, head, kv, pre, quote, title
 
 
 def _pct(a: float, b: float) -> float:
@@ -117,8 +117,8 @@ def analyze_stock(symbol: str, raw: dict[str, pd.DataFrame], index_df: pd.DataFr
     days = index_df.index
     me = month_end_days(days)
     last_me = me[-2] if len(me) > 1 and days[-1].month == (days[-1] + pd.offsets.BDay(1)).month else me[-1]
-    st = [f"- Market filter: NIFTY {ic.iloc[-1]:,.0f} vs 200-day avg {m200.iloc[-1]:,.0f} → "
-          f"{'ON' if regime_on else 'OFF (no new buying)'}"]
+    st = [f"{GREEN if regime_on else RED} Market filter: NIFTY {ic.iloc[-1]:,.0f} vs 200-day avg "
+          f"{m200.iloc[-1]:,.0f} → {'ON' if regime_on else 'OFF (no new buying)'}"]
     for when, label in ((last_me, f"last month-end {last_me:%d %b}"), (days[-1], "today")):
         row_s = score.loc[when].dropna() if when in score.index else pd.Series(dtype=float)
         if symbol in row_s.index:
@@ -150,6 +150,6 @@ def analyze_stock(symbol: str, raw: dict[str, pd.DataFrame], index_df: pd.DataFr
     if not np.isnan(rs_pct):
         v.append(f"- Strength vs other stocks: {'strong' if rs_pct >= 80 else 'average' if rs_pct >= 40 else 'weak'} "
                  f"({rs_pct:.0f}th percentile).")
-    B.append(head("Verdict", "bot rules") + "\n" + esc("\n".join(v)))
+    B.append(head("Verdict", "bot rules") + "\n" + quote(esc("\n".join(v))))
     B.append("<i>" + esc("All strategies are still in PAPER testing – none is validated for real money.") + "</i>")
     return Html("\n\n".join(B))

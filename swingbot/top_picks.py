@@ -116,7 +116,9 @@ def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Tim
                  volume: dict | None = None, delivery_ok: bool = True) -> list[Html]:
     """Watchlist as Telegram messages: header + summary, one card per stock, then checklist/disclaimer.
     Split only between cards, so no card or table is ever cut in half."""
-    from .stock_card import decision, fundamentals_block, history_block, news_block, technical_block
+    from .stock_card import (DECISION_DOT, decision, decision_block, fundamentals_block, history_block, levels_block,
+                             news_block, technical_block)
+    from .tgfmt import GREEN, RED, quote
     from .tracker import pick_uncertainty
 
     limit_rs = capital * max_position_pct / 100
@@ -127,15 +129,11 @@ def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Tim
                                    (fundamentals or {}).get(r.symbol), fundamentals is not None, r.sector,
                                    (news or {}).get(r.symbol))
         label, why = decision(float(r.stop_pct), float(r.trigger), regime_on, reasons, max_stop_pct, limit_rs)
-        summary.append(f"{i:<3}{r.symbol:<11}{r.score:>5.0f}  {label}")
+        summary.append(f"{DECISION_DOT[label]} {r.symbol:<11}{r.score:>3.0f}  {label}")
         B = [f"<b>{i}. {esc(r.symbol)} | {r.score:.0f}/100</b>\n" + esc(
             f"Sector: {sector_name(r.sector)}\nCMP: ₹{r.close:,.2f}\nSetup: {str(r.setup).capitalize()}\n"
             f"Strength: {ordinal(r.rs_pct)} percentile · 6M {r.ret_6m_pct:+.0f}%")]
-        B.append(head("Trading Levels") + "\n" + pre([
-            f"{'Entry above':<12}{'₹' + format(r.trigger, ',.2f'):>11}",
-            f"{'Stop loss':<12}{'₹' + format(r.stop, ',.2f'):>11}{'-' + format(r.stop_pct, 'g') + '%':>7}",
-            f"{'Target 1':<12}{'₹' + format(r.t1, ',.2f'):>11}{'+' + format(r.t1_pct, 'g') + '%':>7}",
-            f"{'Target 2':<12}{'₹' + format(r.t2, ',.2f'):>11}{'+' + format(r.t2_pct, 'g') + '%':>7}"]))
+        B.append(levels_block(r.trigger, r.stop, r.stop_pct, r.t1, r.t1_pct, r.t2, r.t2_pct))
         if volume is not None and r.symbol in volume:
             B.append(technical_block(v.get("profile"), v.get("delivery"), delivery_ok))
         if fundamentals is not None:
@@ -143,16 +141,16 @@ def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Tim
         if odds is not None:
             B.append(history_block(odds.get(r.symbol)))
         B.append(news_block((news or {}).get(r.symbol), reasons))
-        B.append(f"<b>FINAL DECISION: {label}</b>\n" + esc("\n".join(why)))
+        B.append(decision_block(label, why))
         cards.append(SEP_CARD + "\n" + "\n\n".join(b for b in B if b))
 
     top = [title("Top 5 Swing Watchlist", f"{pd.Timestamp(when):%a, %d %b %Y} · paper trading only"),
-           head("Market", "UPTREND" if regime_on else "DOWNTREND") + "\n" + esc(
+           head("Market", f"{GREEN} UPTREND" if regime_on else f"{RED} DOWNTREND") + "\n" + esc(
                "Strategy: setups allowed (paper only)." if regime_on else "Strategy: WATCH ONLY – no fresh buying.")]
     if picks.empty:
         top.append(esc("No stock passes the trend filters today. Cash is a position."))
     else:
-        top.append(head("Summary") + "\n" + pre([f"{'#':<3}{'STOCK':<11}{'SCORE':>5}  DECISION"] + summary))
+        top.append(head("Summary", "stock · score · decision") + "\n" + pre(summary))
 
     if track.get("evaluated"):
         rc = kv([("Picks checked", f"{track['evaluated']}"), (f"Avg {eval_days}D return", f"{track['avg_pct']:+.2f}%"),
@@ -163,14 +161,14 @@ def format_picks(picks: pd.DataFrame, track: dict, regime_on: bool, when: pd.Tim
                  f"Saved watchlists: {track.get('lists', 0)}")
     foot = "\n\n".join([
         SEP_CARD + "\n" + head("Report Card") + "\n" + rc,
-        head("Pre-Trade Checklist") + "\n" + esc("\n".join([
+        head("Pre-Trade Checklist") + "\n" + quote(esc("\n".join([
             "1. Read the latest company news.", "2. Verify results / board meeting dates.",
             "3. Confirm breakout and volume.", "4. Check the entry price before placing the order.",
             "5. Never skip the stop-loss.", f"6. Maximum stop-loss: {max_stop_pct:g}%.",
-            f"7. Per-stock limit: ₹{limit_rs:,.0f}."])),
-        head("Disclaimer") + "\n" + esc(
+            f"7. Per-stock limit: ₹{limit_rs:,.0f}."])), expandable=True),
+        head("Disclaimer") + "\n" + quote(esc(
             "Experimental watchlist for paper trading and learning. Scores and setups are not independently "
-            "validated. No guaranteed returns. Do not place real-money trades based only on this report."),
+            "validated. No guaranteed returns. Do not place real-money trades based only on this report.")),
         esc("Deep dive: GitHub → Actions → Analyze Stock") + "\n" + TAGLINE])
     return pack(["\n\n".join(top)] + cards + [foot])
 

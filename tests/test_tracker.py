@@ -82,8 +82,8 @@ def test_ledger_lifecycle_and_repeats(tmp_path):
     from swingbot.tgfmt import plain
 
     txt = plain(format_tracker(led, changed, card, [], "2026-11-04"))
-    assert "WORKED     AAA        +2.0R 2d" in txt
-    assert "RISK ALERTS\nNone today." in txt and "Need 10+" in txt
+    assert "🟢 AAA        T1 hit +2.0R 2d" in txt
+    assert "RISK ALERTS\n🟢 None today." in txt and "Need 10+" in txt
 
 
 def test_same_day_rerun_replaces_list():

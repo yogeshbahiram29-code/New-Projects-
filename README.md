@@ -59,7 +59,9 @@ The first review is after 3 months. If B beats NIFTY without breaching the 20% d
 To get a deep dive on any stock: GitHub → Actions → **Analyze stock** → type the NSE symbol(s). The report arrives on Telegram.
 
 **Message style.** Telegram messages use a minimal terminal style:
-- uppercase section headings and thin separators, no emojis
+- uppercase section headings and thin separators
+- colour from status dots, since Telegram bots can't colour text: 🟢 positive / OK, 🔴 negative / risk, 🟡 caution, 🔵 entry, ⚪ neutral
+- decisions, alerts and the disclaimer sit in Telegram quote blocks, which have a coloured bar
 - aligned monospace tables, at most 32 characters wide so nothing wraps on a phone
 - each topic arrives as its own message: market dashboard, Option B, watchlist, prediction tracker
 - a long watchlist is split only between stock cards, never inside a table

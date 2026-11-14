@@ -160,9 +160,9 @@ def check_sell(settings, symbol: str, price: float, stop: float | None, target: 
 
 
 def feedback(action: str, symbol: str, qty: int, price: float, stop, target, mistakes: list[str], pnl=None):
-    from .tgfmt import TAGLINE, Html, esc, head, kv, title
+    from .tgfmt import GREEN, RED, TAGLINE, Html, esc, head, kv, quote, title
 
-    B = [title("Trade Recorded", f"{action} {qty} {symbol} @ ₹{price:,.2f}")]
+    B = [title("Trade Recorded", f"{GREEN if action == 'BUY' else RED} {action} {qty} {symbol} @ ₹{price:,.2f}")]
     if action == "BUY":
         B.append(kv([("Stop loss", f"₹{stop:,.2f}" if stop else "NOT SET"),
                      ("Target", f"₹{target:,.2f}" if target else "NOT SET")], 11)
@@ -176,15 +176,15 @@ def feedback(action: str, symbol: str, qty: int, price: float, stop, target, mis
             tip = TIPS.get(x.split(":")[0])
             if tip:
                 rows.append(f"   Tip: {tip}")
-        B.append(head("Mistake Check", f"{len(mistakes)} issue(s)") + "\n" + esc("\n".join(rows)))
+        B.append(head("Mistake Check", f"{len(mistakes)} issue(s)") + "\n" + quote(f"{RED} " + esc("\n".join(rows))))
     else:
-        B.append(head("Mistake Check") + "\n" + esc("No issues – rules followed. Well done."))
+        B.append(head("Mistake Check") + "\n" + esc(f"{GREEN} No issues – rules followed. Well done."))
     B.append(TAGLINE)
     return Html("\n\n".join(B))
 
 
 def weekly_review(settings, journal: Path, today: date | None = None):
-    from .tgfmt import TAGLINE, Html, esc, head, kv, title
+    from .tgfmt import GREEN, RED, TAGLINE, YELLOW, Html, esc, head, kv, title
 
     today = today or date.today()
     start = today - timedelta(days=7)
@@ -203,7 +203,7 @@ def weekly_review(settings, journal: Path, today: date | None = None):
         rows = [("Buys", f"{buys}"), ("Sells", f"{sells}")]
         if len(pnl):
             rows += [("Closed P&L", f"₹{pnl.sum():,.0f}"), ("Winners", f"{int((pnl > 0).sum())}/{len(pnl)}")]
-        rows.append(("Discipline", f"{score:.0f}%"))
+        rows.append(("Discipline", f"{score:.0f}% {GREEN if score >= 80 else YELLOW if score >= 50 else RED}"))
         B.append(head("Trades") + "\n" + kv(rows, 13) + "\n" + esc("Discipline = share of trades with no mistakes."))
         counts: dict[str, int] = {}
         for ms in wk["mistakes"].fillna(""):
@@ -214,9 +214,9 @@ def weekly_review(settings, journal: Path, today: date | None = None):
             B.append(head("Mistakes This Week") + "\n" + kv(
                 [(k, f"x{v}") for k, v in sorted(counts.items(), key=lambda kv_: -kv_[1])], 20))
             top = max(counts, key=counts.get)
-            B.append(head("Focus Next Week", top) + "\n" + esc(TIPS.get(top, "Follow the written plan.")))
+            B.append(head("Focus Next Week", f"{YELLOW} {top}") + "\n" + esc(TIPS.get(top, "Follow the written plan.")))
         else:
-            B.append(esc("No mistakes this week – keep it up."))
+            B.append(esc(f"{GREEN} No mistakes this week – keep it up."))
     paper = journal / "paper_rotation.json"
     if paper.exists():
         st = json.loads(paper.read_text())

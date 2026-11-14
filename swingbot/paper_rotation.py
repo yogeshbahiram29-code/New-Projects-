@@ -28,7 +28,7 @@ from .data import load_full_universe
 from .indicators import sma
 from .notify import Notifier
 from .portfolio import rotation_inputs, rotation_orders
-from .tgfmt import TAGLINE, Html, esc, head, kv, pre, title
+from .tgfmt import GREEN, RED, TAGLINE, Html, dot, esc, head, kv, pre, quote, title
 
 
 def _f(x: float) -> str:
@@ -198,7 +198,7 @@ class RotationPaperTracker:
         review = start + timedelta(days=30 * self.review_months)
         on = bool(regime_on.iloc[-1])
         B = [title("Option B · Paper Portfolio", f"{bar_day:%a, %d %b %Y} · monthly momentum · no real orders")]
-        B.append(head("Market", "UPTREND" if on else "DOWNTREND") + "\n" + esc(
+        B.append(head("Market", f"{GREEN} UPTREND" if on else f"{RED} DOWNTREND") + "\n" + esc(
             f"NIFTY {nifty:,.0f} above its 200-day avg {m.iloc[-1]:,.0f}." if on else
             f"NIFTY {nifty:,.0f} {'below' if nifty < m.iloc[-1] else 'above'} its "
             f"{'rising' if rising else 'falling'} 200-day avg {m.iloc[-1]:,.0f}. Stay in cash."))
@@ -211,7 +211,8 @@ class RotationPaperTracker:
             for sym, h in sorted(st["holdings"].items()):
                 px = float(closes.at[bar_day, sym])
                 chg = (px / h['entry_price'] - 1) * 100
-                rows += [f"{sym + ' x' + str(h['qty']):<22}{chg:>+7.1f}%", f"  {h['entry_price']:,.2f} → {px:,.2f}"]
+                rows += [f"{dot(chg)} {sym + ' x' + str(h['qty']):<19}{chg:>+6.1f}%",
+                         f"   {h['entry_price']:,.2f} → {px:,.2f}"]
                 sec = sectors.get(sym, "UNKNOWN")
                 sec_count[sec] = sec_count.get(sec, 0) + 1
             heavy = [f"{k} x{v}" for k, v in sec_count.items() if v >= 3]
@@ -230,8 +231,9 @@ class RotationPaperTracker:
         worst = st["max_dd_pct"]
         vs = f"{ret - n_ret:+.1f} pts"
         wd = f"{worst:.1f}%"
-        rows = [f"{'vs NIFTY':<13}{vs:<11}{'PASS' if ret >= n_ret else 'FAIL'}",
-                f"{'Worst drop':<13}{wd:<11}{'PASS' if worst <= self.dd_limit else 'FAIL'}"]
+        ok1, ok2 = ret >= n_ret, worst <= self.dd_limit
+        rows = [f"{GREEN if ok1 else RED} {'vs NIFTY':<11}{vs:<11}{'PASS' if ok1 else 'FAIL'}",
+                f"{GREEN if ok2 else RED} {'Worst drop':<11}{wd:<11}{'PASS' if ok2 else 'FAIL'}"]
         score = head("Scorecard", f"first review {review:%d %b %Y}") + "\n" + pre(rows)
         closed = st.get("closed", [])
         if closed:
@@ -239,8 +241,8 @@ class RotationPaperTracker:
             score += "\n" + esc(f"Closed trades {len(closed)} · winners {wins} · "
                                 f"total P&L {_f(sum(c['pnl'] for c in closed))}")
         if st["max_dd_pct"] > self.dd_limit:
-            score += "\n<b>ALERT</b> " + esc("Drawdown limit breached – under the risk rules this strategy "
-                                             "would be PAUSED for review.")
+            score += "\n" + quote(f"{RED} <b>ALERT</b> " + esc("Drawdown limit breached – under the risk rules this "
+                                                               "strategy would be PAUSED for review."))
         B.append(score + "\n\n" + TAGLINE)
         return Html("\n\n".join(B))
 

@@ -360,29 +360,30 @@ def _n(x) -> str:
 def format_tracker(ledger: pd.DataFrame, changed: pd.DataFrame, card: dict, alerts: list[str], when,
                    paper: dict | None = None, horizon: int = 20) -> list:
     """Prediction tracker as Telegram message(s): alerts, today's changes, open predictions, scorecard."""
-    from .tgfmt import TAGLINE, esc, head, kv, pack, pre, title
+    from .tgfmt import BLUE, GREEN, RED, TAGLINE, WHITE, YELLOW, esc, head, kv, pack, pre, quote, title
 
+    sev_dot = {"HIGH": RED, "CAUTION": YELLOW, "CHECK": "🟠"}
     B = [title("Prediction Tracker", f"{pd.Timestamp(when):%a, %d %b %Y}")]
     if alerts:
         rows = []
         for a in alerts:
             sev, _, text = a.partition(": ")
-            rows.append(f"<b>{esc(sev)}</b> · {esc(text)}" if sev in ("HIGH", "CAUTION", "CHECK") else esc(a))
-        B.append(head("Risk Alerts", str(len(alerts))) + "\n" + "\n".join(rows))
+            rows.append(f"{sev_dot[sev]} <b>{esc(sev)}</b> · {esc(text)}" if sev in sev_dot else esc(a))
+        B.append(head("Risk Alerts", str(len(alerts))) + "\n" + quote("\n".join(rows)))
     else:
-        B.append(head("Risk Alerts") + "\nNone today.")
+        B.append(head("Risk Alerts") + "\n" + f"{GREEN} None today.")
 
     ch = changed[changed["status"] != "REPEAT"] if len(changed) else changed
     rows = []
     for r in ch.itertuples(index=False):
         if r.status == "WORKED":
-            rows.append(f"{'WORKED':<11}{r.symbol:<11}{float(r.r):+.1f}R {int(r.days)}d")
+            rows.append(f"{GREEN} {r.symbol:<11}T1 hit {float(r.r):+.1f}R {int(r.days)}d")
         elif r.status == "FAILED":
-            rows.append(f"{'FAILED':<11}{r.symbol:<11}{float(r.r):+.1f}R" + (" gap" if str(r.gap) == "True" else ""))
+            rows.append(f"{RED} {r.symbol:<11}SL hit {float(r.r):+.1f}R" + (" gap" if str(r.gap) == "True" else ""))
         elif r.status == "EXPIRED":
-            rows.append(f"{'TIME-OUT':<11}{r.symbol:<11}{float(r.r):+.1f}R")
+            rows.append(f"{WHITE} {r.symbol:<11}time-out {float(r.r):+.1f}R")
         elif r.status == "ACTIVE":
-            rows.append(f"{'TRIGGERED':<11}{r.symbol:<11}{_n(r.entry)}")
+            rows.append(f"{BLUE} {r.symbol:<11}entry {_n(r.entry)}")
     void = [r.symbol for r in ch.itertuples(index=False) if r.status in ("NOT_TRIGGERED", "MISSED")]
     today = head("Today")
     if rows:
@@ -391,20 +392,18 @@ def format_tracker(ledger: pd.DataFrame, changed: pd.DataFrame, card: dict, aler
         today += "\n" + esc(f"Not triggered (void): {', '.join(void)}")
     if not rows and not void:
         today += "\nNo status changes since the last session."
-    if any(r.status == "WORKED" for r in ch.itertuples(index=False)):
-        today += "\n" + esc("WORKED = Target 1 hit · TRIGGERED value = paper entry price")
-    elif rows:
-        today += "\n" + esc("TRIGGERED value = paper entry price")
+    if rows:
+        today += "\n" + esc("entry = triggered, paper entry price · T1 hit = worked · SL hit = failed")
     B.append(today)
 
     act = ledger[ledger["status"] == "ACTIVE"] if len(ledger) else ledger
     waiting = int((ledger["status"] == "WAITING").sum()) if len(ledger) else 0
     open_ = head("Open Predictions", str(len(act)))
     if len(act):
-        rows = [f"{'STOCK':<10}{'CMP':>10}{'R':>6}{'DAY':>6}", "  STOP LOSS → TARGET 1", "─" * 30]
+        rows = [f"{'STOCK':<10}{'CMP':>10}{'R':>6}{'DAY':>6}", "   SL → T1", "─" * 30]
         for r in act.itertuples(index=False):
             rows += [f"{r.symbol:<10}{_n(r.last_close):>10}{float(r.r):>+6.1f}{f'{int(r.days)}/{horizon}':>6}",
-                     f"  {_n(r.stop)} → {_n(r.t1)}"]
+                     f"{GREEN if float(r.r) >= 0 else RED} {_n(r.stop)} → {_n(r.t1)}"]
         open_ += "\n" + pre(rows)
     else:
         open_ += "\nNone right now."
@@ -422,17 +421,18 @@ def format_tracker(ledger: pd.DataFrame, changed: pd.DataFrame, card: dict, aler
         if card["closed"]:
             exp = f" · hist {card['exp_hit_pct']:.0f}%" if "exp_hit_pct" in card else ""
             rows += [("Hit rate", f"{card['hit_pct']:.0f}%{exp}"), ("Avg R", f"{card['avg_r']:+.2f} before costs"),
-                     ("After costs", f"{card['avg_net_r']:+.2f}R")]
+                     ("After costs", f"{card['avg_net_r']:+.2f}R {GREEN if card['avg_net_r'] > 0 else RED}")]
         sc = head("Scorecard", f"since {pd.Timestamp(card['since']):%d %b %Y}") + "\n" + kv(rows, 13)
         if card["closed"] < 10:
-            sc += "\n" + esc(f"Only {card['closed']} closed. Need 10+ before judging whether predictions work.")
+            sc += "\n" + esc(f"{YELLOW} Only {card['closed']} closed. Need 10+ before judging whether predictions work.")
         B.append(sc)
     foot = []
     if paper and paper.get("history"):
         eq, nifty = paper["history"][-1][1], paper["history"][-1][2]
+        r_b, r_n = (eq / paper["start_capital"] - 1) * 100, (nifty / paper["start_nifty"] - 1) * 100
         foot.append(head("Option B") + "  " + esc(
-            f"paper {(eq / paper['start_capital'] - 1) * 100:+.1f}% vs NIFTY "
-            f"{(nifty / paper['start_nifty'] - 1) * 100:+.1f}% since {pd.Timestamp(paper['start_date']):%d %b}"))
+            f"{GREEN if r_b >= r_n else RED} paper {r_b:+.1f}% vs NIFTY {r_n:+.1f}% "
+            f"since {pd.Timestamp(paper['start_date']):%d %b}"))
     foot.append(esc('Paper tracking only. "Worked" = Target 1 hit before the stop-loss (2R).') + "\n" + TAGLINE)
     B.append("\n\n".join(foot))
     return pack(["\n\n".join(B)]) if len("\n\n".join(B)) <= 3500 else pack(B)

@@ -5,7 +5,9 @@ Presentation only: every value comes from the existing calculations
 """
 from __future__ import annotations
 
-from .tgfmt import esc, head, kv, short
+from .tgfmt import BLUE, GREEN, RED, WHITE, YELLOW, esc, head, kv, quote, short
+
+DECISION_DOT = {"SKIP": RED, "WATCH ONLY": YELLOW, "BUY WATCH": GREEN}
 
 FLAG_TEXT = {
     "📅 results/board meeting": "Results / board meeting",
@@ -33,7 +35,7 @@ def technical_block(profile: dict | None, deliveries: list[float] | None, delive
                 "low": "Low delivery: mostly short-term trading."}.get(lvl, "")
     elif not delivery_ok:
         rows.append(("Delivery", "n/a (NSE blocked)"))
-    rows.append(("Flow", profile["verdict"]))
+    rows.append(("Flow", f"{profile['verdict']} " + {"ACCUMULATION": GREEN, "DISTRIBUTION": RED}.get(profile["verdict"], WHITE)))
     return head("Technical Data") + "\n" + kv(rows, 13) + ("\n" + esc(note) if note else "")
 
 
@@ -48,9 +50,9 @@ def fundamentals_block(f: dict | None, sector: str = "") -> str:
                                             ("Debt/Equity", v["de"]), ("Profit growth", v["growth"])], 14)
     warn, good = assess(f, sector)
     if warn:
-        out += "\n" + esc("Flag: " + ", ".join(warn) + ".")
+        out += "\n" + esc(f"{RED} Flag: " + ", ".join(warn) + ".")
     elif good:
-        out += "\n" + esc("Positives: " + ", ".join(good) + ".")
+        out += "\n" + esc(f"{GREEN} Positives: " + ", ".join(good) + ".")
     return out
 
 
@@ -59,7 +61,8 @@ def history_block(o: dict | None) -> str:
 
     if not o:
         return head("Historical Performance") + "\n" + esc("Not enough history yet (Actions → Refresh odds).")
-    edge = {"positive": "POSITIVE", "thin": "THIN (cost risk)", "none": "NONE"}[edge_level(o["avg_r"])]
+    edge = {"positive": f"POSITIVE {GREEN}", "thin": f"THIN (cost risk) {YELLOW}",
+            "none": f"NONE {RED}"}[edge_level(o["avg_r"])]
     return (head("Historical Performance") + "\n" + esc(f"{o['period']} · {int(o['cases']):,} similar cases") + "\n"
             + kv([("T1 first", f"{o['target_first_pct']:.0f}%"), ("SL first", f"{o['stop_first_pct']:.0f}%"),
                   ("Neither", f"{o['neither_pct']:.0f}%"), ("Average R", f"{o['avg_r']:+.2f} before costs"),
@@ -70,6 +73,10 @@ def uncertainty_text(reasons: list[str]) -> str:
     if not reasons:
         return "LOW – no conflicting signals (not a guarantee)"
     return ("HIGH – " if len(reasons) >= 2 else "MEDIUM – ") + ", ".join(reasons)
+
+
+def uncertainty_dot(reasons: list[str]) -> str:
+    return GREEN if not reasons else RED if len(reasons) >= 2 else YELLOW
 
 
 def news_block(check, reasons: list[str] | None = None, headlines: int = 2) -> str:
@@ -84,7 +91,7 @@ def news_block(check, reasons: list[str] | None = None, headlines: int = 2) -> s
             if check.flags:
                 body.append("Flags: " + " · ".join(FLAG_TEXT.get(f, f) for f in check.flags))
     if reasons is not None:
-        body.append("Uncertainty: " + uncertainty_text(reasons))
+        body.append(f"{uncertainty_dot(reasons)} Uncertainty: " + uncertainty_text(reasons))
     return head("News & Risk") + "\n" + esc("\n".join(body)) if body else ""
 
 
@@ -109,4 +116,18 @@ def decision(stop_pct: float, trigger: float, regime_on: bool, reasons: list[str
     return "BUY WATCH", [f"Buy only above ₹{trigger:,.2f}, stop-loss order placed at once (paper)."]
 
 
-__all__ = ["technical_block", "fundamentals_block", "history_block", "news_block", "decision", "uncertainty_text"]
+def decision_block(label: str, why: list[str]) -> str:
+    return quote(f"<b>{DECISION_DOT.get(label, WHITE)} FINAL DECISION: {esc(label)}</b>\n" + esc("\n".join(why)))
+
+
+def levels_block(trigger, stop, stop_pct, t1, t1_pct, t2, t2_pct) -> str:
+    from .tgfmt import pre
+
+    def r(d, label, px, pc=""):
+        return f"{d} {label:<10}{'₹' + format(px, ',.2f'):>11}{pc:>7}"
+    return head("Trading Levels") + "\n" + pre([
+        r(BLUE, "Entry", trigger), r(RED, "Stop Loss", stop, f"-{stop_pct:g}%"),
+        r(GREEN, "Target 1", t1, f"+{t1_pct:g}%"), r(GREEN, "Target 2", t2, f"+{t2_pct:g}%")])
+
+
+__all__ = ["decision_block", "levels_block", "uncertainty_dot", "technical_block", "fundamentals_block", "history_block", "news_block", "decision", "uncertainty_text"]

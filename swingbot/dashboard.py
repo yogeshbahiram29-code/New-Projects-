@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .tgfmt import TAGLINE, Html, esc, head, kv, pre, title
+from .tgfmt import GREEN, RED, TAGLINE, YELLOW, Html, dot, esc, head, pre, quote, title
 
 GLOBALS = [  # key, label, value format
     ("SP500", "S&P 500", "{:,.0f}"),
@@ -77,38 +77,41 @@ def market_dashboard(raw: dict[str, pd.DataFrame], index_df: pd.DataFrame, secto
     blocks = [title("Market Dashboard", f"{when:%a, %d %b %Y}")]
 
     # -- indices
-    rows = [f"{'':<10}{'LAST':>7}{'1D%':>7}{'1M%':>7}",
-            f"{'NIFTY 50':<10}{ic.iloc[-1]:>7,.0f}{_c(_chg(ic, 1)):>7}{_c(_chg(ic, 21)):>7}"]
+    def row(label, last, ch1, ch21, invert=False):  # every row starts with a colour dot (keeps columns aligned)
+        return f"{dot(ch1, invert)} {label:<9}{last:>7}{_c(ch1):>6}{_c(ch21):>6}"
+
+    rows = [row("NIFTY 50", f"{ic.iloc[-1]:,.0f}", _chg(ic, 1), _chg(ic, 21))]
     bn = extra.get("BANKNIFTY")
     if bn is not None and len(bn) > 22:
-        rows.append(f"{'BANKNIFTY':<10}{bn['close'].iloc[-1]:>7,.0f}{_c(_chg(bn['close'], 1)):>7}"
-                    f"{_c(_chg(bn['close'], 21)):>7}")
+        rows.append(row("BANKNIFTY", f"{bn['close'].iloc[-1]:,.0f}", _chg(bn["close"], 1), _chg(bn["close"], 21)))
     vix = extra.get("INDIAVIX")
     vix_lvl = None
     if vix is not None and len(vix) > 2:
         vix_lvl = float(vix["close"].iloc[-1])
-        rows.append(f"{'INDIA VIX':<10}{vix_lvl:>7.1f}{_c(_chg(vix['close'], 1)):>7}{_c(_chg(vix['close'], 21)):>7}")
+        rows.append(row("INDIA VIX", f"{vix_lvl:.1f}", _chg(vix["close"], 1), _chg(vix["close"], 21), invert=True))
     trend = (f"UPTREND – above rising 200 DMA ({m200.iloc[-1]:,.0f})" if on else
              f"DOWNTREND – {'below' if ic.iloc[-1] < m200.iloc[-1] else 'above'} "
              f"{'rising' if rising else 'falling'} 200 DMA ({m200.iloc[-1]:,.0f})")
-    idx_lines = [f"Trend: {trend}",
+    idx_lines = [f"{GREEN if on else RED} Trend: {trend}",
                  f"NIFTY 1W: {_p(_chg(ic, 5))} · From 52W high: {(ic.iloc[-1] / hi52 - 1) * 100:+.1f}%"]
     if vix_lvl is not None:
         mood = "calm" if vix_lvl < 14 else "normal" if vix_lvl < 20 else "elevated" if vix_lvl < 25 else "HIGH fear"
         idx_lines.append(f"Volatility: {mood}")
-    blocks.append(head("Indices") + "\n" + pre(rows) + "\n" + esc("\n".join(idx_lines)))
+    blocks.append(head("Indices", "last · 1D% · 1M%") + "\n" + pre(rows) + "\n" + esc("\n".join(idx_lines)))
 
     # -- breadth
     b = breadth(raw, when)
-    blocks.append(head("Breadth", f"NIFTY 500 · {b['n']} stocks") + "\n" + kv([
-        ("Advancing", f"{b['adv']:>5}"), ("Declining", f"{b['dec']:>5}"),
-        ("Above 200 DMA", f"{b['above200']:>4.0f}%"), ("Above 50 DMA", f"{b['above50']:>4.0f}%")], 14))
+    blocks.append(head("Breadth", f"NIFTY 500 · {b['n']} stocks") + "\n" + pre([
+        f"{GREEN} {'Advancing':<14}{b['adv']:>5}",
+        f"{RED} {'Declining':<14}{b['dec']:>5}",
+        f"{GREEN if b['above200'] >= 50 else RED} {'Above 200 DMA':<14}{b['above200']:>4.0f}%",
+        f"{GREEN if b['above50'] >= 50 else RED} {'Above 50 DMA':<14}{b['above50']:>4.0f}%"]))
 
     # -- sectors
     ss = sector_strength(raw, sectors, when)
     if len(ss) >= 6:
-        rows = ["STRONGEST"] + [f"{sector_name(k, 22):<23}{v:>+6.1f}%" for k, v in ss.head(3).items()]
-        rows += ["WEAKEST"] + [f"{sector_name(k, 22):<23}{v:>+6.1f}%" for k, v in ss.tail(3)[::-1].items()]
+        rows = [f"{GREEN} STRONGEST"] + [f"   {sector_name(k, 21):<21}{v:>+6.1f}%" for k, v in ss.head(3).items()]
+        rows += [f"{RED} WEAKEST"] + [f"   {sector_name(k, 21):<21}{v:>+6.1f}%" for k, v in ss.tail(3)[::-1].items()]
         blocks.append(head("Sectors", "1-month median") + "\n" + pre(rows))
 
     # -- global cues
@@ -117,23 +120,24 @@ def market_dashboard(raw: dict[str, pd.DataFrame], index_df: pd.DataFrame, secto
         df = extra.get(key)
         if df is None or len(df) < 23:
             continue
-        g.append(f"{label:<10}{fmt.format(df['close'].iloc[-1]):>8}{_c(_chg(df['close'], 1)):>7}"
-                 f"{_c(_chg(df['close'], 21)):>7}")
+        c1 = _chg(df["close"], 1)
+        g.append(f"{dot(c1)} {label:<9}{fmt.format(df['close'].iloc[-1]):>8}{_c(c1):>6}{_c(_chg(df['close'], 21)):>6}")
     if g:
-        blocks.append(head("Global Cues") + "\n" + pre([f"{'':<10}{'LAST':>8}{'1D%':>7}{'1M%':>7}"] + g))
+        blocks.append(head("Global Cues", "last · 1D% · 1M%") + "\n" + pre(g))
 
     # -- outlook
     a200 = b["above200"]
     if on and a200 >= 60:
-        out = ["Healthy uptrend. Most stocks are rising with the index – setups allowed (paper)."]
+        out = [f"{GREEN} Healthy uptrend. Most stocks are rising with the index – setups allowed (paper)."]
     elif on:
-        out = ["Uptrend but narrow. Only a minority of stocks are strong – be very selective."]
+        out = [f"{YELLOW} Uptrend but narrow. Only a minority of stocks are strong – be very selective."]
     elif a200 < 40:
-        out = ["Risk-off. Index in downtrend and most stocks below their 200 DMA – protect capital, no fresh buying."]
+        out = [f"{RED} Risk-off. Index in downtrend and most stocks below their 200 DMA – protect capital, "
+               "no fresh buying."]
     else:
-        out = ["Mixed. Market filter OFF (index below its 200 DMA, or the 200 DMA still falling) – "
+        out = [f"{YELLOW} Mixed. Market filter OFF (index below its 200 DMA, or the 200 DMA still falling) – "
                "wait for it to turn ON."]
     if vix_lvl is not None and vix_lvl >= 20:
-        out.append("Volatility is elevated – expect bigger swings; use smaller positions.")
-    blocks.append(head("Outlook") + "\n" + esc("\n".join(out)) + "\n\n" + TAGLINE)
+        out.append(f"{YELLOW} Volatility is elevated – expect bigger swings; use smaller positions.")
+    blocks.append(head("Outlook") + "\n" + quote(esc("\n".join(out))) + "\n" + TAGLINE)
     return Html("\n\n".join(blocks))

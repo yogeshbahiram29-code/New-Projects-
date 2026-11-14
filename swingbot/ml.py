@@ -151,7 +151,7 @@ FRIENDLY = {"score": "bot score", "rs_pct": "relative strength rank", "rsi14": "
 
 
 def format_report(res: dict):
-    from .tgfmt import TAGLINE, Html, esc, head, kv, title
+    from .tgfmt import GREEN, RED, TAGLINE, Html, esc, head, kv, quote, title
 
     B = [title("Machine-Learning Test", "out-of-sample")]
     if res.get("error"):
@@ -174,7 +174,7 @@ def format_report(res: dict):
         if m.get("drivers"):
             blk += "\n" + esc("Drivers: " + ", ".join(f"{FRIENDLY.get(k, k)} ({'+' if c > 0 else '−'})" for k, c in m["drivers"]))
         blk += "\n" + esc("Rules: " + " · ".join(f"{'PASS' if ok else 'FAIL'} {k}" for k, ok in m["checks"].items()))
-        blk += f"\n<b>{'ADOPT' if m['adopted'] else 'NOT ADOPTED'}</b>"
+        blk += f"\n{GREEN if m['adopted'] else RED} <b>{'ADOPT' if m['adopted'] else 'NOT ADOPTED'}</b>"
         B.append(blk)
     if res.get("red_flags"):
         B.append(head("Red Flags") + "\n" + esc("\n".join(res["red_flags"])))
@@ -187,7 +187,7 @@ def format_report(res: dict):
                 "AUC near 0.50 = coin flip: these daily indicators don't predict which trade wins."
                 if best < 0.55 else "The model sees a weak pattern, but not enough to beat the score after costs."]
     mean.append("Past results are not a promise. Risk management stays the main edge.")
-    B.append(head("What It Means") + "\n" + esc("\n".join(mean)) + "\n\n" + TAGLINE)
+    B.append(head("What It Means") + "\n" + quote(esc("\n".join(mean))) + "\n" + TAGLINE)
     return Html("\n\n".join(B))
 
 

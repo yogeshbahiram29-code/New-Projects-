@@ -691,11 +691,12 @@ def cmd_signals(args, settings) -> int:
                     import traceback
 
                     traceback.print_exc()
-                    from .tgfmt import Html, esc, head, title
+                    from .tgfmt import RED, Html, esc, head, quote, title
 
-                    track_msg = Html(title("Prediction Tracker") + "\n\n" + head("Risk Alerts", "1") + "\n<b>HIGH</b> · "
-                                     + esc(f"The tracker failed today ({type(e).__name__}: {str(e)[:150]}). Past "
-                                           "predictions were NOT checked – treat today's watchlist with extra caution."))
+                    track_msg = Html(title("Prediction Tracker") + "\n\n" + head("Risk Alerts", "1") + "\n" + quote(
+                        f"{RED} <b>HIGH</b> · " + esc(f"The tracker failed today ({type(e).__name__}: {str(e)[:150]}). "
+                                                      "Past predictions were NOT checked – treat today's watchlist "
+                                                      "with extra caution.")))
                 print("\n" + plain(track_msg))
                 if not args.no_whatsapp and not notifier.send(track_msg):
                     print(f"ERROR: the {notifier.provider} prediction-tracker message was NOT delivered.")
