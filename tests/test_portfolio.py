@@ -78,17 +78,22 @@ def test_top_picks_respect_count_sector_cap_and_track_record(tmp_path):
             assert (picks["stop"] < picks["trigger"]).all()
         track = record_and_evaluate(picks, cut, idx.loc[:d], hist, eval_days=10)
     assert track["lists"] >= 2 and track["evaluated"] > 0
-    text = format_picks(picks, track, True, idx.index[-1])
-    assert text.startswith("🤖 TOP 5 SWING TRADING WATCHLIST") and "Paper Trading / Learning Purpose Only" in text
-    assert "🎯 Target 1:" in text or picks.empty
-    assert "✅ PRE-TRADE CHECKLIST" in text and "Discipline First | Capital Protection Always." in text
+    from swingbot.tgfmt import plain
+
+    parts = format_picks(picks, track, True, idx.index[-1])
+    text = plain(parts)
+    assert text.startswith("TOP 5 SWING WATCHLIST") and "paper trading only" in text
+    assert "Target 1" in text or picks.empty
+    assert "PRE-TRADE CHECKLIST" in text and "DISCLAIMER" in text and "Discipline first. Capital protection always." in text
+    assert all(len(p) <= 3500 for p in parts)
     if len(picks):
         assert (picks["stop"] < picks["trigger"]).all() and (picks["trigger"] < picks["t1"]).all() and (picks["t1"] <= picks["t2"]).all()
     wide = pd.DataFrame([{"symbol": "X", "sector": "S", "score": 80.0, "rs_pct": 90.0, "close": 9000.0, "ret_6m_pct": 50.0,
                           "setup": "breakout", "trigger": 9010.0, "stop": 8000.0, "stop_pct": 11.2,
                           "t1": 11030.0, "t1_pct": 22.4, "t2": 12040.0, "t2_pct": 33.6}])
-    flagged = format_picks(wide, {}, True, idx.index[-1])
-    assert "⚠️ SL exceeds 8% risk rule – SKIP." in flagged and "⚠️ Capital Alert" in flagged
+    flagged = plain(format_picks(wide, {}, True, idx.index[-1]))
+    assert "FINAL DECISION: SKIP" in flagged and "Stop-loss 11.2% exceeds the 8% rule." in flagged
+    assert "exceeds the ₹5,000 per-stock limit" in flagged
     from swingbot.top_picks import ordinal
     assert [ordinal(x) for x in (1, 2, 3, 11, 12, 13, 21, 81, 96, 100)] == \
         ["1st", "2nd", "3rd", "11th", "12th", "13th", "21st", "81st", "96th", "100th"]

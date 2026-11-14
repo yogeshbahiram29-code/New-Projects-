@@ -29,6 +29,7 @@ from pathlib import Path
 import requests
 
 from .config import env
+from .tgfmt import Html, esc, plain, split_html, whatsapp
 
 log = logging.getLogger("swingbot.notify")
 MAX_LEN = 1500
@@ -86,7 +87,7 @@ class Notifier:
                     return str(chat["id"])
         return None
 
-    def _telegram_send(self, text: str) -> bool:
+    def _telegram_send(self, text: str, as_html: bool = False) -> bool:
         token = env("TELEGRAM_BOT_TOKEN").strip().strip('"').strip("'")
         tried: list[str] = []
         # tolerate pasted extras like quotes, spaces or 'id:' - keep digits and a leading minus
@@ -95,8 +96,15 @@ class Notifier:
         for attempt in range(2):
             for chat_id in [c for c in candidates if c and c not in tried]:
                 tried.append(chat_id)
-                r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
-                                  json={"chat_id": chat_id, "text": text}, timeout=20)
+                payload = {"chat_id": chat_id, "text": text}
+                if as_html:
+                    payload.update({"parse_mode": "HTML", "link_preview_options": {"is_disabled": True}})
+                r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage", json=payload, timeout=20)
+                if as_html and r.status_code == 400 and "parse" in (r.text or "").lower():
+                    # formatting rejected: never lose the message - resend the same words as plain text
+                    log.warning("telegram rejected the HTML formatting (%s) - sending plain text", r.text[:120])
+                    r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                                      json={"chat_id": chat_id, "text": plain(Html(text))}, timeout=20)
                 if r.status_code < 300 and r.json().get("ok"):
                     if chat_id != self._stored_chat_id():
                         self._save_chat_id(chat_id)
@@ -116,21 +124,35 @@ class Notifier:
                 return False
         return False
 
-    def send(self, text: str, urgent: bool = False) -> bool:
-        prefix = "🚨 SwingBot ALERT: " if urgent else ("" if text.startswith("🤖") else "🤖 ")
-        text = f"{prefix}{text}"
+    def send(self, text, urgent: bool = False) -> bool:
+        """Send one message, or a list of messages (each part arrives as its own Telegram message)."""
+        parts = list(text) if isinstance(text, (list, tuple)) else [text]
+        ok = True
+        for part in parts:
+            ok &= self._send_message(part, urgent)
+        return ok
+
+    def _send_message(self, text, urgent: bool = False) -> bool:
+        as_html = isinstance(text, Html)
+        if urgent:
+            text = Html("<b>ALERT · SWINGBOT</b>\n" + (text if as_html else esc(text)))
+            as_html = True
         with open(self.log_path, "a", encoding="utf-8") as fh:
-            fh.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {text}\n")
-        log.info(text)
+            fh.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {plain(text)}\n")
+        log.info(plain(text))
         if self.provider == "none":
             return True
         ok = True
-        limit = 3800 if self.provider == "telegram" else MAX_LEN  # Telegram allows 4096 chars per message
-        for part in _split(text, limit):
-            ok &= self._send_one(part)
+        if self.provider == "telegram":  # Telegram allows 4096 chars per message
+            chunks = split_html(text, 3800) if as_html else _split(text, 3800)
+            for part in chunks:
+                ok &= self._send_one(part, as_html)
+        else:  # WhatsApp: same text with WhatsApp markup
+            for part in _split(whatsapp(text) if as_html else text, MAX_LEN):
+                ok &= self._send_one(part)
         return ok
 
-    def _send_one(self, text: str) -> bool:
+    def _send_one(self, text: str, as_html: bool = False) -> bool:
         if self.provider not in REQUIRED_ENV:
             log.error("unknown notification provider %s", self.provider)
             return False
@@ -169,7 +191,7 @@ class Notifier:
                     if r.status_code < 300:
                         return True
                 else:  # telegram
-                    return self._telegram_send(text)
+                    return self._telegram_send(text, as_html)
                 log.warning("%s send failed (%s): %s", self.provider, r.status_code, r.text[:200])
                 if 400 <= r.status_code < 500 and r.status_code != 429:
                     return False  # bad token / chat id: retrying won't help

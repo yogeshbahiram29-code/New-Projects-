@@ -58,6 +58,21 @@ The first review is after 3 months. If B beats NIFTY without breaching the 20% d
 
 To get a deep dive on any stock: GitHub → Actions → **Analyze stock** → type the NSE symbol(s). The report arrives on Telegram.
 
+**Message style.** Telegram messages use a minimal terminal style:
+- uppercase section headings and thin separators, no emojis
+- aligned monospace tables, at most 32 characters wide so nothing wraps on a phone
+- each topic arrives as its own message: market dashboard, Option B, watchlist, prediction tracker
+- a long watchlist is split only between stock cards, never inside a table
+- if Telegram ever rejects the formatting, the same words are re-sent as plain text
+- WhatsApp gets the same text with WhatsApp markup
+
+Each watchlist stock card has these sections: header, trading levels, technical data, fundamentals, historical performance, news & risk, final decision.
+
+**FINAL DECISION** is derived from the existing rules; no new trading logic was added:
+- **SKIP:** breaks a hard rule. The stop is wider than the 8% rule, or one share costs more than the per-stock limit.
+- **WATCH ONLY:** the market filter is OFF, or uncertainty is HIGH (2+ conflicting signals).
+- **BUY WATCH:** the market filter is ON and there is at most one conflict. Buy only above the entry, with the stop-loss order placed at once. Paper only.
+
 **Daily messages, in order:**
 1. 🌍 **Market dashboard:**
    - NIFTY trend and 52-week distance
@@ -77,7 +92,7 @@ To get a deep dive on any stock: GitHub → Actions → **Analyze stock** → ty
    - 🎲 **historical odds:** how often similar past setups (same type, score band and market trend, NIFTY 500 since 2015) hit Target 1 before the stop
    - 🏢 **fundamentals:** market cap, P/E, ROE, D/E, profit growth, with flags
    - 📰 **news**
-   - 🟡/🔴 **uncertainty line:** lists every conflicting signal for the pick: money flowing out, no historical edge, a fundamental red flag, results or legal news, or a data source that couldn't be checked. A pick with no conflicts gets "✅ Confidence check", which is still not a guarantee.
+   - **uncertainty (LOW / MEDIUM / HIGH):** lists every conflicting signal for the pick: money flowing out, no historical edge, a fundamental red flag, results or legal news, or a data source that couldn't be checked. LOW means no conflicts, which is still not a guarantee.
 4. 🔍 **Prediction tracker.** Every watchlist pick is a prediction: "if it trades above the entry, Target 1 comes before the stop". **Every session** the bot re-checks *every* past prediction against the real candles, using the same rules as the odds table:
    - statuses: waiting, not triggered, active, ✅ worked, ❌ failed (stop), ⏳ time-out after 20 sessions
    - a stock picked again while its earlier prediction is still open is not counted twice
@@ -419,5 +434,5 @@ journalctl -u swingbot -f
 ## Tests
 
 ```bash
-pytest -q        # 91 tests: risk rules, exits, costs, setups, backtester, engine, signal mode, odds, volume, mistakes, ML, prediction tracker
+pytest -q        # 97 tests: risk rules, exits, costs, setups, backtester, engine, signal mode, odds, volume, mistakes, ML, prediction tracker
 ```

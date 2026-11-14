@@ -36,7 +36,9 @@ def test_noise_is_not_adopted():
     res = run_ml_test(_events(signal=0.0))
     for m in res["models"].values():
         assert abs(m["auc"] - 0.5) < 0.06 and not m["adopted"]
-    txt = format_report(res)
+    from swingbot.tgfmt import plain
+
+    txt = plain(format_report(res))
     assert "NOT ADOPTED" in txt and "keeps the simple score" in txt
 
 
@@ -46,7 +48,11 @@ def test_real_signal_is_found_and_adopted():
     assert lr["auc"] > 0.65 and lr["top20_net_r"] > res["score"]["top20_net_r"] + 0.1
     assert lr["drivers"][0][0] == "x" and lr["adopted"]
     assert res["red_flags"]  # an AUC this high must be questioned, not celebrated
-    assert "✅ ADOPT" in format_report(res)
+    import re
+
+    from swingbot.tgfmt import plain
+
+    assert re.search(r"^ADOPT$", plain(format_report(res)), re.M)
 
 
 def test_daily_top_counts_only_triggered():
@@ -65,4 +71,6 @@ def test_features_from_real_pipeline():
         assert col in ev.columns
     assert (ev["stop_pct"] > 0).all()
     small = run_ml_test(ev)
-    assert "error" in small and "not enough" in format_report(small)
+    from swingbot.tgfmt import plain
+
+    assert "error" in small and "not enough" in plain(format_report(small))

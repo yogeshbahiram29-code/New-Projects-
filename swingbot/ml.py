@@ -150,44 +150,45 @@ FRIENDLY = {"score": "bot score", "rs_pct": "relative strength rank", "rsi14": "
             "is_pullback": "pullback setup"}
 
 
-def format_report(res: dict) -> str:
-    L = ["🧠 MACHINE-LEARNING TEST (out-of-sample)", ""]
+def format_report(res: dict):
+    from .tgfmt import TAGLINE, Html, esc, head, kv, title
+
+    B = [title("Machine-Learning Test", "out-of-sample")]
     if res.get("error"):
-        return "\n".join(L + [f"❌ {res['error']}"])
-    L += [f"📚 Trained on: {res['train_period']} ({res['n_train']:,} trades)",
-          f"🧪 Tested on: {res['test_period']} ({res['n_test']:,} trades it never saw)",
-          f"💸 Costs: {res['cost_pct']:.2f}% per round trip, converted to R", "",
-          "━━━━━━━━━━━━━━━━━━",
-          f"📊 All test trades: avg {res['all']['avg_net_r']:+.2f}R after costs · T1 first {res['all']['win_pct']:.0f}%",
-          f"🔢 Bot score ranking: AUC {res['score']['auc']:.3f} · top-20% {res['score']['top20_net_r']:+.2f}R · "
-          f"daily top-5 {res['score']['daily5'][0]:+.2f}R ({res['score']['daily5'][1]:,} trades)", ""]
+        return Html("\n\n".join(B + [esc(f"Not run: {res['error']}")]))
+    B.append(kv([("Trained", f"{res['train_period']}"), ("", f"{res['n_train']:,} trades"),
+                 ("Tested", f"{res['test_period']}"), ("", f"{res['n_test']:,} unseen trades"),
+                 ("Costs", f"{res['cost_pct']:.2f}% round trip")], 9))
+    sc = res["score"]
+    B.append(head("Baseline") + "\n" + kv([
+        ("All trades", f"{res['all']['avg_net_r']:+.2f}R after costs"), ("T1 first", f"{res['all']['win_pct']:.0f}%"),
+        ("Score AUC", f"{sc['auc']:.3f}"), ("Score top 20%", f"{sc['top20_net_r']:+.2f}R"),
+        ("Score daily 5", f"{sc['daily5'][0]:+.2f}R ({sc['daily5'][1]:,})")], 14))
     for name, m in res["models"].items():
-        L += [f"🤖 {name}",
-              f"   AUC {m['auc']:.3f} (train {m['train_auc']:.3f}) · top-20% {m['top20_net_r']:+.2f}R "
-              f"(T1 first {m['top20_win_pct']:.0f}%) · daily top-5 {m['daily5'][0]:+.2f}R ({m['daily5'][1]:,} trades)",
-              "   By year (model AUC / score AUC): " + ", ".join(f"{y} {a:.2f}/{b:.2f}" for y, (a, b) in m["years"].items()),
-              "   Calibration (predicted → actual T1-first %, low→high): "
-              + ", ".join(f"{p:.0f}→{a:.0f}" for p, a in m["calibration"])]
+        rows = [("AUC", f"{m['auc']:.3f} (train {m['train_auc']:.3f})"), ("Top 20%", f"{m['top20_net_r']:+.2f}R"),
+                ("Top 20% T1", f"{m['top20_win_pct']:.0f}%"),
+                ("Daily top 5", f"{m['daily5'][0]:+.2f}R ({m['daily5'][1]:,})")]
+        blk = head(name) + "\n" + kv(rows, 12)
+        blk += "\n" + esc("By year (model/score AUC): " + ", ".join(f"{y} {a:.2f}/{b:.2f}" for y, (a, b) in m["years"].items()))
+        blk += "\n" + esc("Calibration (predicted → actual T1%): " + ", ".join(f"{p:.0f}→{a:.0f}" for p, a in m["calibration"]))
         if m.get("drivers"):
-            L.append("   Biggest drivers: " + ", ".join(f"{FRIENDLY.get(k, k)} ({'+' if c > 0 else '−'})"
-                                                     for k, c in m["drivers"]))
-        L.append("   Rules: " + " · ".join(f"{'✅' if ok else '❌'} {k}" for k, ok in m["checks"].items()))
-        L.append(f"   ➡️ {'✅ ADOPT' if m['adopted'] else '❌ NOT ADOPTED'}")
-        L.append("")
-    for f in res.get("red_flags", []):
-        L.append(f"🚩 {f}")
+            blk += "\n" + esc("Drivers: " + ", ".join(f"{FRIENDLY.get(k, k)} ({'+' if c > 0 else '−'})" for k, c in m["drivers"]))
+        blk += "\n" + esc("Rules: " + " · ".join(f"{'PASS' if ok else 'FAIL'} {k}" for k, ok in m["checks"].items()))
+        blk += f"\n<b>{'ADOPT' if m['adopted'] else 'NOT ADOPTED'}</b>"
+        B.append(blk)
+    if res.get("red_flags"):
+        B.append(head("Red Flags") + "\n" + esc("\n".join(res["red_flags"])))
     adopted = [n for n, m in res["models"].items() if m["adopted"]]
-    L += ["━━━━━━━━━━━━━━━━━━", "🧭 WHAT IT MEANS"]
     if adopted:
-        L.append(f"• {adopted[0]} passed every rule on unseen years. Next: forward paper-test it before any real use.")
+        mean = [f"{adopted[0]} passed every rule on unseen years. Next: forward paper-test it before any real use."]
     else:
-        L.append("• ML did not reliably beat the simple score on unseen years, so the bot keeps the simple score.")
         best = max(m["auc"] for m in res["models"].values())
-        L.append("• AUC near 0.50 = coin flip: these daily indicators don't predict which trade wins."
-                 if best < 0.55 else "• The model sees a weak pattern, but not enough to beat the score after costs.")
-    L += ["• Past results are not a promise. Risk management stays the main edge.", "",
-          "📊 Discipline First | Capital Protection Always."]
-    return "\n".join(L)
+        mean = ["ML did not reliably beat the simple score on unseen years, so the bot keeps the simple score.",
+                "AUC near 0.50 = coin flip: these daily indicators don't predict which trade wins."
+                if best < 0.55 else "The model sees a weak pattern, but not enough to beat the score after costs."]
+    mean.append("Past results are not a promise. Risk management stays the main edge.")
+    B.append(head("What It Means") + "\n" + esc("\n".join(mean)) + "\n\n" + TAGLINE)
+    return Html("\n\n".join(B))
 
 
 __all__ = ["run_ml_test", "format_report", "split", "net_r", "daily_top", "top_frac", "adoption"]

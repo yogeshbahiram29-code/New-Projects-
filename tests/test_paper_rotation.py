@@ -60,10 +60,12 @@ def test_repeat_run_changes_nothing_and_message_is_paper_only(market, tmp_path):
     d = idx.index[400]
     tracker = RotationPaperTracker(settings, FakeData(frames), None, tmp_path / "paper.json")
     msg = tracker.run(today=d.date(), send=False)
-    assert msg.startswith("📁 OPTION B PAPER PORTFOLIO") and "no real orders" in msg
+    from swingbot.tgfmt import plain
+
+    assert plain(msg).startswith("OPTION B · PAPER PORTFOLIO") and "no real orders" in plain(msg)
     before = (tmp_path / "paper.json").read_text()
     again = tracker.run(today=d.date(), send=False)
-    assert again.startswith("(repeat)")
+    assert plain(again).startswith("(repeat)") and "PERFORMANCE" in plain(again)
     assert (tmp_path / "paper.json").read_text() == before
 
 

@@ -246,10 +246,9 @@ def pick_uncertainty(profile: dict | None = None, odds: dict | None = None, has_
 
 
 def format_pick_uncertainty(reasons: list[str]) -> str:
-    if not reasons:
-        return "✅ Confidence check: no conflicting signals (still not a guarantee)"
-    icon = "🔴 High uncertainty" if len(reasons) >= 2 else "🟡 Uncertainty"
-    return f"{icon}: " + " · ".join(reasons)
+    from .stock_card import uncertainty_text
+
+    return "Uncertainty: " + uncertainty_text(reasons)
 
 
 def expected_last_session(now: datetime | None = None) -> date:
@@ -269,7 +268,7 @@ def uncertainty_alerts(ledger: pd.DataFrame, changed: pd.DataFrame, card: dict, 
                        index_df: pd.DataFrame | None = None, regime_on: bool | None = None, extra: dict | None = None,
                        raw: dict | None = None, sources: dict | None = None, news: dict | None = None,
                        paper: dict | None = None, now: datetime | None = None) -> list[str]:
-    """🔴 = act / don't trust today's signals blindly, 🟡 = be careful."""
+    """Each alert starts with its severity: HIGH (act / don't trust signals blindly), CAUTION, or CHECK."""
     A: list[str] = []
     led = ledger.reindex(columns=COLS) if len(ledger) else pd.DataFrame(columns=COLS)
     active = led[led["status"] == "ACTIVE"]
@@ -279,31 +278,32 @@ def uncertainty_alerts(ledger: pd.DataFrame, changed: pd.DataFrame, card: dict, 
         last = index_df.index[-1].date()
         exp = expected_last_session(now)
         if last < exp:
-            A.append(f"🟡 Latest price data is {last:%a %d %b} (expected {exp:%a %d %b}). If the market was open, "
-                     "data is late – levels may be stale.")
+            A.append(f"CAUTION: Latest price data is {last:%a %d %b} (expected {exp:%a %d %b}). "
+                     "If the market was open, levels may be stale.")
     if raw is not None:
         missing = sorted(s for s in open_["symbol"] if s not in raw)
         if missing:
-            A.append(f"🔴 No price data for open prediction(s): {', '.join(missing)} – check them yourself in the app.")
+            A.append(f"HIGH: No price data for open prediction(s): {', '.join(missing)}. Check them in the app.")
     src = sources or {}
     if src.get("news_failed"):
-        A.append(f"🟡 News could not be checked for: {', '.join(src['news_failed'])}.")
+        A.append(f"CAUTION: News could not be checked for: {', '.join(src['news_failed'])}.")
     if src.get("delivery_ok") is False:
-        A.append("🟡 NSE delivery % unavailable today (NSE blocked the server).")
+        A.append("CAUTION: NSE delivery % unavailable today (NSE blocked the server).")
     if src.get("funda_missing"):
-        A.append(f"🟡 Fundamentals missing for: {', '.join(src['funda_missing'])}.")
+        A.append(f"CAUTION: Fundamentals missing for: {', '.join(src['funda_missing'])}.")
     if src.get("odds_missing"):
-        A.append("🟡 Historical odds table missing – run Actions → Refresh odds.")
+        A.append("CAUTION: Historical odds table missing. Run Actions → Refresh odds.")
     # -- predictions
     for r in changed.itertuples(index=False):
         if r.status == "FAILED" and str(r.gap) == "True":
-            A.append(f"🔴 {r.symbol}: price gapped below the stop – loss bigger than planned ({float(r.r):+.1f}R). "
+            A.append(f"HIGH: {r.symbol} gapped below the stop – loss bigger than planned ({float(r.r):+.1f}R). "
                      "Gaps are why position size is kept small.")
     for r in active.itertuples(index=False):
         if pd.notna(r.r) and float(r.r) <= c["near_stop_r"]:
-            A.append(f"🟡 {r.symbol} is close to its stop-loss ({float(r.r):+.1f}R) – make sure the GTT stop is live.")
+            A.append(f"CAUTION: {r.symbol} is close to its stop-loss ({float(r.r):+.1f}R). Confirm the GTT stop is live.")
         if regime_on is False and str(r.regime_on) == "True":
-            A.append(f"🟡 Market filter turned OFF after {r.symbol} was predicted – no new entries; don't widen its stop.")
+            A.append(f"CAUTION: Market filter turned OFF after {r.symbol} was predicted. No new entries; "
+                     "don't widen its stop.")
     results_news = []
     for sym, chk in (news or {}).items():
         if sym in set(active["symbol"]) and chk is not None and chk.ok:
@@ -311,10 +311,10 @@ def uncertainty_alerts(ledger: pd.DataFrame, changed: pd.DataFrame, card: dict, 
             if "results" in flags:
                 results_news.append(sym)
             if "regulatory" in flags or "rating" in flags:
-                A.append(f"🔴 {sym} (open): legal/rating/promoter news – read it today.")
+                A.append(f"HIGH: {sym} (open): legal/rating/promoter news. Read it today.")
     if results_news:
-        A.append(f"🟡 Results/board-meeting news on open predictions: {', '.join(results_news)} – "
-                 "a gap past the stop is possible.")
+        A.append(f"CAUTION: Results/board-meeting news on open predictions: {', '.join(results_news)}. "
+                 "A gap past the stop is possible.")
     closed = led[led["status"].isin(CLOSED)].sort_values("exit_date")
     streak = 0
     for s in reversed(closed["status"].tolist()):
@@ -322,99 +322,120 @@ def uncertainty_alerts(ledger: pd.DataFrame, changed: pd.DataFrame, card: dict, 
             break
         streak += 1
     if streak >= c["losing_streak"]:
-        A.append(f"🔴 {streak} predictions in a row hit the stop-loss – conditions may have changed. "
-                 "Paper-trade only until a winner appears.")
+        A.append(f"HIGH: {streak} predictions in a row hit the stop-loss. Conditions may have changed; "
+                 "paper-trade only until a winner appears.")
     if card.get("exp_n", 0) >= c["drift_min_closed"]:
         if card["p_worse"] < c["drift_p"]:
-            A.append(f"🔴 Predictions are working WORSE than history: {card['exp_wins']}/{card['exp_n']} hit Target 1 "
+            A.append(f"HIGH: Predictions are working WORSE than history: {card['exp_wins']}/{card['exp_n']} hit Target 1 "
                      f"vs {card['exp_hit_pct']:.0f}% expected (chance of bad luck only {card['p_worse'] * 100:.1f}%). "
                      "Trust the watchlist less until this recovers.")
     if card.get("closed", 0) >= c["drift_min_closed"] and card.get("hit_pct", 0) > 75:
-        A.append(f"🚩 Hit rate {card['hit_pct']:.0f}% is suspiciously high – check the data for errors before trusting it.")
+        A.append(f"CHECK: Hit rate {card['hit_pct']:.0f}% is suspiciously high. Check the data for errors before "
+                 "trusting it.")
     # -- market
     if index_df is not None and len(index_df) >= 2:
         mv = (float(index_df["close"].iloc[-1]) / float(index_df["close"].iloc[-2]) - 1) * 100
         if abs(mv) >= c["nifty_move_pct"]:
-            A.append(f"🟡 NIFTY moved {mv:+.1f}% today – big market days make stops and triggers less reliable.")
+            A.append(f"CAUTION: NIFTY moved {mv:+.1f}% today. Big market days make stops and triggers less reliable.")
     vix = (extra or {}).get("INDIAVIX")
     if vix is not None and len(vix) >= 2:
         v, pv = float(vix["close"].iloc[-1]), float(vix["close"].iloc[-2])
         if v >= c["vix_high"]:
-            A.append(f"🟡 India VIX {v:.1f} – high volatility; normal noise can hit stops.")
+            A.append(f"CAUTION: India VIX {v:.1f} – high volatility; normal noise can hit stops.")
         elif pv > 0 and (v / pv - 1) * 100 >= c["vix_jump_pct"]:
-            A.append(f"🟡 India VIX jumped {(v / pv - 1) * 100:+.0f}% today – fear is rising.")
+            A.append(f"CAUTION: India VIX jumped {(v / pv - 1) * 100:+.0f}% today – fear is rising.")
     if paper and paper.get("history"):
         eq = [h[1] for h in paper["history"]]
         dd = (1 - eq[-1] / max(eq + [paper.get("start_capital", eq[0])])) * 100
         if dd >= c["paper_dd_warn_pct"]:
-            A.append(f"🟡 Option B paper portfolio is {dd:.1f}% below its peak (stop-review limit 20%).")
+            A.append(f"CAUTION: Option B paper portfolio is {dd:.1f}% below its peak (stop-review limit 20%).")
     return A
 
 
 # ---------------------------------------------------------------- message
-LINE = "━━━━━━━━━━━━━━━━━━"
-
-
-def _rs(x) -> str:
-    return f"₹{float(x):,.2f}"
+def _n(x) -> str:
+    return f"{float(x):,.2f}"
 
 
 def format_tracker(ledger: pd.DataFrame, changed: pd.DataFrame, card: dict, alerts: list[str], when,
-                   paper: dict | None = None, horizon: int = 20) -> str:
-    L = ["🔍 PREDICTION TRACKER", f"📅 {pd.Timestamp(when):%A, %d %B %Y}", "", LINE]
+                   paper: dict | None = None, horizon: int = 20) -> list:
+    """Prediction tracker as Telegram message(s): alerts, today's changes, open predictions, scorecard."""
+    from .tgfmt import TAGLINE, esc, head, kv, pack, pre, title
+
+    B = [title("Prediction Tracker", f"{pd.Timestamp(when):%a, %d %b %Y}")]
     if alerts:
-        L.append(f"🚨 UNCERTAINTY ALERTS ({len(alerts)})")
-        L += [f"• {a}" for a in alerts]
+        rows = []
+        for a in alerts:
+            sev, _, text = a.partition(": ")
+            rows.append(f"<b>{esc(sev)}</b> · {esc(text)}" if sev in ("HIGH", "CAUTION", "CHECK") else esc(a))
+        B.append(head("Risk Alerts", str(len(alerts))) + "\n" + "\n".join(rows))
     else:
-        L.append("✅ No uncertainty alerts today.")
-    L += [LINE, "📰 TODAY'S UPDATES"]
-    ups = []
+        B.append(head("Risk Alerts") + "\nNone today.")
+
     ch = changed[changed["status"] != "REPEAT"] if len(changed) else changed
+    rows = []
     for r in ch.itertuples(index=False):
         if r.status == "WORKED":
-            ups.append(f"✅ WORKED: {r.symbol} hit Target 1 {_rs(r.t1)} ({float(r.r):+.1f}R in {int(r.days)} days)")
+            rows.append(f"{'WORKED':<11}{r.symbol:<11}{float(r.r):+.1f}R {int(r.days)}d")
         elif r.status == "FAILED":
-            ups.append(f"❌ FAILED: {r.symbol} hit the stop-loss {_rs(r.stop)} ({float(r.r):+.1f}R"
-                       + (", gap" if str(r.gap) == "True" else "") + ")")
+            rows.append(f"{'FAILED':<11}{r.symbol:<11}{float(r.r):+.1f}R" + (" gap" if str(r.gap) == "True" else ""))
         elif r.status == "EXPIRED":
-            ups.append(f"⏳ TIME-OUT: {r.symbol} {horizon} sessions without target or stop ({float(r.r):+.1f}R)")
+            rows.append(f"{'TIME-OUT':<11}{r.symbol:<11}{float(r.r):+.1f}R")
         elif r.status == "ACTIVE":
-            ups.append(f"🟢 TRIGGERED: {r.symbol} traded above {_rs(r.trigger)} – paper entry {_rs(r.entry)}")
-    nt = [r.symbol for r in ch.itertuples(index=False) if r.status in ("NOT_TRIGGERED", "MISSED")]
-    if nt:
-        ups.append(f"⚪ Not triggered (prediction void): {', '.join(nt)}")
-    L += ups or ["No status changes since the last session."]
+            rows.append(f"{'TRIGGERED':<11}{r.symbol:<11}{_n(r.entry)}")
+    void = [r.symbol for r in ch.itertuples(index=False) if r.status in ("NOT_TRIGGERED", "MISSED")]
+    today = head("Today")
+    if rows:
+        today += "\n" + pre(rows)
+    if void:
+        today += "\n" + esc(f"Not triggered (void): {', '.join(void)}")
+    if not rows and not void:
+        today += "\nNo status changes since the last session."
+    if any(r.status == "WORKED" for r in ch.itertuples(index=False)):
+        today += "\n" + esc("WORKED = Target 1 hit · TRIGGERED value = paper entry price")
+    elif rows:
+        today += "\n" + esc("TRIGGERED value = paper entry price")
+    B.append(today)
+
     act = ledger[ledger["status"] == "ACTIVE"] if len(ledger) else ledger
-    L += [LINE, f"📂 OPEN PREDICTIONS ({len(act)})"]
-    for r in act.itertuples(index=False):
-        L.append(f"• {r.symbol} (from {pd.Timestamp(r.date):%d %b}): {_rs(r.last_close)} now, {float(r.r):+.1f}R, "
-                 f"day {int(r.days)}/{horizon} | SL {_rs(r.stop)} · T1 {_rs(r.t1)}")
-    if act.empty:
-        L.append("None right now.")
     waiting = int((ledger["status"] == "WAITING").sum()) if len(ledger) else 0
+    open_ = head("Open Predictions", str(len(act)))
+    if len(act):
+        rows = [f"{'STOCK':<10}{'CMP':>10}{'R':>6}{'DAY':>6}", "  STOP LOSS → TARGET 1", "─" * 30]
+        for r in act.itertuples(index=False):
+            rows += [f"{r.symbol:<10}{_n(r.last_close):>10}{float(r.r):>+6.1f}{f'{int(r.days)}/{horizon}':>6}",
+                     f"  {_n(r.stop)} → {_n(r.t1)}"]
+        open_ += "\n" + pre(rows)
+    else:
+        open_ += "\nNone right now."
     if waiting:
-        L.append(f"⏳ Waiting for the next session: {waiting} (today's list)")
-    L += [LINE, f"📊 SCORECARD (since {pd.Timestamp(card['since']):%d %b %Y})" if card.get("n") else "📊 SCORECARD"]
+        open_ += "\n" + esc(f"Waiting for the next session: {waiting} (today's list)")
+    B.append(open_)
+
     if not card.get("n"):
-        L.append("No predictions recorded yet.")
+        B.append(head("Scorecard") + "\nNo predictions recorded yet.")
     else:
         trig_pct = card["triggered"] / card["decided"] * 100 if card["decided"] else 0
-        L.append(f"Predictions: {card['n']} | Triggered: {card['triggered']} ({trig_pct:.0f}% of decided)")
-        L.append(f"Closed: {card['closed']} → ✅ {card['worked']} worked | ❌ {card['failed']} failed | "
-                 f"⏳ {card['expired']} time-out")
+        rows = [("Predictions", f"{card['n']}"), ("Triggered", f"{card['triggered']} ({trig_pct:.0f}% of decided)"),
+                ("Closed", f"{card['closed']}"), ("  Worked", f"{card['worked']}"), ("  Failed", f"{card['failed']}"),
+                ("  Time-out", f"{card['expired']}")]
         if card["closed"]:
-            exp = f" (history expects {card['exp_hit_pct']:.0f}%)" if "exp_hit_pct" in card else ""
-            L.append(f"🎯 Hit rate: {card['hit_pct']:.0f}%{exp}")
-            L.append(f"💰 Avg {card['avg_r']:+.2f}R before charges · {card['avg_net_r']:+.2f}R after")
+            exp = f" · hist {card['exp_hit_pct']:.0f}%" if "exp_hit_pct" in card else ""
+            rows += [("Hit rate", f"{card['hit_pct']:.0f}%{exp}"), ("Avg R", f"{card['avg_r']:+.2f} before costs"),
+                     ("After costs", f"{card['avg_net_r']:+.2f}R")]
+        sc = head("Scorecard", f"since {pd.Timestamp(card['since']):%d %b %Y}") + "\n" + kv(rows, 13)
         if card["closed"] < 10:
-            L.append(f"📏 Only {card['closed']} closed – need 10+ before judging whether predictions work.")
+            sc += "\n" + esc(f"Only {card['closed']} closed. Need 10+ before judging whether predictions work.")
+        B.append(sc)
+    foot = []
     if paper and paper.get("history"):
         eq, nifty = paper["history"][-1][1], paper["history"][-1][2]
-        L += [LINE, f"📁 Option B paper: {(eq / paper['start_capital'] - 1) * 100:+.1f}% vs NIFTY "
-                    f"{(nifty / paper['start_nifty'] - 1) * 100:+.1f}% since {pd.Timestamp(paper['start_date']):%d %b}"]
-    L += [LINE, "🧪 Paper tracking only. \"Worked\" = Target 1 hit before the stop-loss (2R).",
-          "📊 Discipline First | Capital Protection Always."]
-    return "\n".join(L)
+        foot.append(head("Option B") + "  " + esc(
+            f"paper {(eq / paper['start_capital'] - 1) * 100:+.1f}% vs NIFTY "
+            f"{(nifty / paper['start_nifty'] - 1) * 100:+.1f}% since {pd.Timestamp(paper['start_date']):%d %b}"))
+    foot.append(esc('Paper tracking only. "Worked" = Target 1 hit before the stop-loss (2R).') + "\n" + TAGLINE)
+    B.append("\n\n".join(foot))
+    return pack(["\n\n".join(B)]) if len("\n\n".join(B)) <= 3500 else pack(B)
 
 
 def load_paper(journal: Path) -> dict | None:

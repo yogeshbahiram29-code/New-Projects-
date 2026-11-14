@@ -274,25 +274,27 @@ def cmd_analyze(args, settings) -> int:
     raw = cache.load(syms + [bench], int(settings.get("data.history_days", 600)))
     index_df = raw.pop(bench)
     from .data import load_names
-    from .news import fetch_news, format_news
+    from .news import fetch_news
 
     names = load_names(settings)
     reports = []
     for sym in args.symbols:
         rep = analyze_stock(sym, raw, index_df, settings, uni)
         if sym.upper() in raw:
-            from .fundamentals import fetch_fundamentals, format_fundamentals
+            from .fundamentals import fetch_fundamentals
+            from .stock_card import fundamentals_block, news_block, technical_block
+            from .tgfmt import Html
+            from .volume_quality import fetch_delivery, volume_profile
 
-            rep += "\n\n" + "\n".join(format_fundamentals(fetch_fundamentals(sym.upper()), uni.get(sym.upper(), "")))
-            from .volume_quality import fetch_delivery, format_volume, volume_profile
-
-            deliv = fetch_delivery([d.date() for d in index_df.index[-10:]], [sym.upper()])
-            rep += "\n" + "\n".join(format_volume(volume_profile(raw[sym.upper()]), (deliv or {}).get(sym.upper()),
-                                                     deliv is not None))
-            rep += "\n\n" + "\n".join(format_news(fetch_news(sym.upper(), names.get(sym.upper())), indent=""))
+            s_ = sym.upper()
+            deliv = fetch_delivery([d.date() for d in index_df.index[-10:]], [s_])
+            extra_blocks = [technical_block(volume_profile(raw[s_]), (deliv or {}).get(s_), deliv is not None),
+                            fundamentals_block(fetch_fundamentals(s_), uni.get(s_, "")),
+                            news_block(fetch_news(s_, names.get(s_)), None, headlines=3)]
+            body, _, tail = rep.rpartition("\n\n<i>")  # keep the disclaimer/tagline last
+            rep = Html("\n\n".join([body] + [b for b in extra_blocks if b]) + "\n\n<i>" + tail) if body else rep
         reports.append(rep)
-    text = "\n\n".join(reports)
-    print(text)
+    print(plain(reports))
     if args.send:
         n = Notifier(settings.get("notifications.whatsapp_provider", "callmebot"), settings.get("paths.state_dir", "state"),
                      store_path=Path(settings.get("signals.dir", "journal")) / "telegram.json")
@@ -351,9 +353,9 @@ def cmd_ml_test(args, settings) -> int:
         events.to_csv(cache_file, index=False)
     res = run_ml_test(events, args.test_start, args.cost_pct)
     text = format_report(res)
-    print("\n" + text)
+    print("\n" + plain(text))
     out = Path(settings.get("signals.dir", "journal")) / "ml_report.txt"
-    out.write_text(text + "\n")
+    out.write_text(plain(text) + "\n")
     if args.send:
         desk = _desk(settings)
         if desk.n is not None and not desk.n.send(text):
@@ -532,6 +534,9 @@ def cmd_test_whatsapp(args, settings) -> int:
     return 0 if ok else 1
 
 
+from .tgfmt import plain  # noqa: E402
+
+
 def _desk(settings, need_data: bool = False):
     from .data import CachedData, make_provider
     from .notify import Notifier
@@ -621,7 +626,7 @@ def cmd_signals(args, settings) -> int:
                 extra = {}
             messages.insert(0, market_dashboard(raw_d, idx_d, uni_d, extra))
         for msg in messages:
-            print(msg + "\n")
+            print(plain(msg) + "\n")
             if not args.no_whatsapp and not notifier.send(msg):
                 print(f"ERROR: the {notifier.provider} alert was NOT delivered (see warnings above).")
                 return 3
@@ -674,7 +679,7 @@ def cmd_signals(args, settings) -> int:
             from .mistakes import save_watchlist_state
 
             save_watchlist_state(settings, picks, regime_on, index_df.index[-1])
-            print("\n" + text)
+            print("\n" + plain(text))
             if not args.no_whatsapp and not notifier.send(text):
                 print(f"ERROR: the {notifier.provider} watchlist message was NOT delivered.")
                 return 3
@@ -686,10 +691,12 @@ def cmd_signals(args, settings) -> int:
                     import traceback
 
                     traceback.print_exc()
-                    track_msg = (f"🔍 PREDICTION TRACKER\n🔴 UNCERTAINTY ALERT: the tracker failed today ({type(e).__name__}: "
-                                 f"{str(e)[:150]}).\nPast predictions were NOT checked – treat today's watchlist with "
-                                 "extra caution.")
-                print("\n" + track_msg)
+                    from .tgfmt import Html, esc, head, title
+
+                    track_msg = Html(title("Prediction Tracker") + "\n\n" + head("Risk Alerts", "1") + "\n<b>HIGH</b> · "
+                                     + esc(f"The tracker failed today ({type(e).__name__}: {str(e)[:150]}). Past "
+                                           "predictions were NOT checked – treat today's watchlist with extra caution."))
+                print("\n" + plain(track_msg))
                 if not args.no_whatsapp and not notifier.send(track_msg):
                     print(f"ERROR: the {notifier.provider} prediction-tracker message was NOT delivered.")
                     return 3
@@ -712,8 +719,8 @@ def cmd_signals(args, settings) -> int:
     return 0
 
 
-def _send_feedback(desk, text: str, send: bool) -> int:
-    print("\n" + text)
+def _send_feedback(desk, text, send: bool) -> int:
+    print("\n" + plain(text))
     if send and desk.n is not None and not desk.n.send(text):
         print(f"ERROR: the {desk.n.provider} trade feedback was NOT delivered.")
         return 3

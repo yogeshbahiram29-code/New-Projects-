@@ -4,15 +4,15 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-LINE = "━━━━━━━━━━━━━━━━━━"
+from .tgfmt import TAGLINE, Html, esc, head, kv, pre, title
 
-GLOBALS = [  # key, label, unit/format
-    ("SP500", "🇺🇸 S&P 500", "{:,.0f}"),
-    ("NASDAQ", "💻 Nasdaq", "{:,.0f}"),
-    ("BRENT", "🛢️ Brent crude", "${:,.1f}"),
-    ("USDINR", "💵 USD/INR", "₹{:,.2f}"),
-    ("GOLD", "🥇 Gold", "${:,.0f}"),
-    ("US10Y", "🏛️ US 10Y yield", "{:.2f}%"),
+GLOBALS = [  # key, label, value format
+    ("SP500", "S&P 500", "{:,.0f}"),
+    ("NASDAQ", "Nasdaq", "{:,.0f}"),
+    ("BRENT", "Brent $", "{:,.1f}"),
+    ("USDINR", "USD/INR", "{:,.2f}"),
+    ("GOLD", "Gold $", "{:,.0f}"),
+    ("US10Y", "US 10Y %", "{:.2f}"),
 ]
 
 
@@ -23,6 +23,10 @@ def _chg(s: pd.Series, n: int) -> float:
 
 def _p(x: float) -> str:
     return "n/a" if x is None or np.isnan(x) else f"{x:+.1f}%"
+
+
+def _c(x: float) -> str:  # table cell: change without the % sign (column header says %)
+    return "n/a" if x is None or np.isnan(x) else f"{x:+.1f}"
 
 
 def breadth(raw: dict[str, pd.DataFrame], when: pd.Timestamp) -> dict:
@@ -60,7 +64,9 @@ def sector_strength(raw: dict[str, pd.DataFrame], sectors: dict[str, str], when:
 
 
 def market_dashboard(raw: dict[str, pd.DataFrame], index_df: pd.DataFrame, sectors: dict[str, str],
-                     extra: dict[str, pd.DataFrame] | None = None) -> str:
+                     extra: dict[str, pd.DataFrame] | None = None) -> Html:
+    from .tgfmt import sector_name
+
     extra = extra or {}
     ic = index_df["close"]
     when = index_df.index[-1]
@@ -68,52 +74,65 @@ def market_dashboard(raw: dict[str, pd.DataFrame], index_df: pd.DataFrame, secto
     rising = bool(m200.iloc[-1] > m200.iloc[-21])
     on = bool(ic.iloc[-1] > m200.iloc[-1] and rising)
     hi52 = float(index_df["high"].iloc[-252:].max())
-    L = ["🌍 MARKET DASHBOARD", f"📅 {when:%A, %d %B %Y}", "", LINE,
-         f"🇮🇳 NIFTY 50: {ic.iloc[-1]:,.0f} (1D {_p(_chg(ic, 1))} | 1W {_p(_chg(ic, 5))} | 1M {_p(_chg(ic, 21))})",
-         (f"📈 Trend: UPTREND – above rising 200-DMA ({m200.iloc[-1]:,.0f})" if on else
-          f"📉 Trend: DOWNTREND – {'below' if ic.iloc[-1] < m200.iloc[-1] else 'above'} "
-          f"{'rising' if rising else 'falling'} 200-DMA ({m200.iloc[-1]:,.0f})"),
-         f"📏 From 52-week high: {(ic.iloc[-1] / hi52 - 1) * 100:+.1f}%"]
+    blocks = [title("Market Dashboard", f"{when:%a, %d %b %Y}")]
+
+    # -- indices
+    rows = [f"{'':<10}{'LAST':>7}{'1D%':>7}{'1M%':>7}",
+            f"{'NIFTY 50':<10}{ic.iloc[-1]:>7,.0f}{_c(_chg(ic, 1)):>7}{_c(_chg(ic, 21)):>7}"]
     bn = extra.get("BANKNIFTY")
     if bn is not None and len(bn) > 22:
-        L.append(f"🏦 Bank NIFTY: {bn['close'].iloc[-1]:,.0f} (1D {_p(_chg(bn['close'], 1))} | 1M {_p(_chg(bn['close'], 21))})")
+        rows.append(f"{'BANKNIFTY':<10}{bn['close'].iloc[-1]:>7,.0f}{_c(_chg(bn['close'], 1)):>7}"
+                    f"{_c(_chg(bn['close'], 21)):>7}")
     vix = extra.get("INDIAVIX")
     vix_lvl = None
     if vix is not None and len(vix) > 2:
         vix_lvl = float(vix["close"].iloc[-1])
+        rows.append(f"{'INDIA VIX':<10}{vix_lvl:>7.1f}{_c(_chg(vix['close'], 1)):>7}{_c(_chg(vix['close'], 21)):>7}")
+    trend = (f"UPTREND – above rising 200 DMA ({m200.iloc[-1]:,.0f})" if on else
+             f"DOWNTREND – {'below' if ic.iloc[-1] < m200.iloc[-1] else 'above'} "
+             f"{'rising' if rising else 'falling'} 200 DMA ({m200.iloc[-1]:,.0f})")
+    idx_lines = [f"Trend: {trend}",
+                 f"NIFTY 1W: {_p(_chg(ic, 5))} · From 52W high: {(ic.iloc[-1] / hi52 - 1) * 100:+.1f}%"]
+    if vix_lvl is not None:
         mood = "calm" if vix_lvl < 14 else "normal" if vix_lvl < 20 else "elevated" if vix_lvl < 25 else "HIGH fear"
-        L.append(f"😨 India VIX: {vix_lvl:.1f} (1D {_p(_chg(vix['close'], 1))}) – {mood}")
+        idx_lines.append(f"Volatility: {mood}")
+    blocks.append(head("Indices") + "\n" + pre(rows) + "\n" + esc("\n".join(idx_lines)))
 
+    # -- breadth
     b = breadth(raw, when)
-    L += [LINE, f"📊 MARKET BREADTH (NIFTY 500, {b['n']} stocks)",
-          f"🟢 Advancing: {b['adv']} | 🔴 Declining: {b['dec']}",
-          f"📈 Above 200-DMA: {b['above200']:.0f}% | Above 50-DMA: {b['above50']:.0f}%"]
+    blocks.append(head("Breadth", f"NIFTY 500 · {b['n']} stocks") + "\n" + kv([
+        ("Advancing", f"{b['adv']:>5}"), ("Declining", f"{b['dec']:>5}"),
+        ("Above 200 DMA", f"{b['above200']:>4.0f}%"), ("Above 50 DMA", f"{b['above50']:>4.0f}%")], 14))
 
+    # -- sectors
     ss = sector_strength(raw, sectors, when)
     if len(ss) >= 6:
-        L += [LINE, "🏆 STRONGEST SECTORS (1M)"] + [f"{i}. {k} {v:+.1f}%" for i, (k, v) in enumerate(ss.head(3).items(), 1)]
-        L += ["🐢 WEAKEST SECTORS (1M)"] + [f"{i}. {k} {v:+.1f}%" for i, (k, v) in enumerate(ss.tail(3)[::-1].items(), 1)]
+        rows = ["STRONGEST"] + [f"{sector_name(k, 22):<23}{v:>+6.1f}%" for k, v in ss.head(3).items()]
+        rows += ["WEAKEST"] + [f"{sector_name(k, 22):<23}{v:>+6.1f}%" for k, v in ss.tail(3)[::-1].items()]
+        blocks.append(head("Sectors", "1-month median") + "\n" + pre(rows))
 
+    # -- global cues
     g = []
     for key, label, fmt in GLOBALS:
         df = extra.get(key)
         if df is None or len(df) < 23:
             continue
-        g.append(f"{label}: {fmt.format(df['close'].iloc[-1])} ({_p(_chg(df['close'], 1))} | {_p(_chg(df['close'], 21))})")
+        g.append(f"{label:<10}{fmt.format(df['close'].iloc[-1]):>8}{_c(_chg(df['close'], 1)):>7}"
+                 f"{_c(_chg(df['close'], 21)):>7}")
     if g:
-        L += [LINE, "🌐 GLOBAL CUES (1D | 1M)"] + g
+        blocks.append(head("Global Cues") + "\n" + pre([f"{'':<10}{'LAST':>8}{'1D%':>7}{'1M%':>7}"] + g))
 
+    # -- outlook
     a200 = b["above200"]
-    L += [LINE, "🧭 WHAT IT MEANS"]
     if on and a200 >= 60:
-        L.append("🟢 Healthy uptrend: most stocks are rising with the index – setups allowed (paper).")
+        out = ["Healthy uptrend. Most stocks are rising with the index – setups allowed (paper)."]
     elif on:
-        L.append("🟡 Uptrend but narrow: only a minority of stocks are strong – be very selective.")
+        out = ["Uptrend but narrow. Only a minority of stocks are strong – be very selective."]
     elif a200 < 40:
-        L.append("🔴 Risk-off: index in downtrend and most stocks below their 200-DMA – protect capital, no fresh buying.")
+        out = ["Risk-off. Index in downtrend and most stocks below their 200 DMA – protect capital, no fresh buying."]
     else:
-        L.append("🟠 Mixed: index below its trend line – wait for the market filter to turn ON.")
+        out = ["Mixed. Index below its trend line – wait for the market filter to turn ON."]
     if vix_lvl is not None and vix_lvl >= 20:
-        L.append("⚠️ Volatility is elevated – expect bigger swings; use smaller positions.")
-    L += ["", "📊 Discipline First | Capital Protection Always."]
-    return "\n".join(L)
+        out.append("Volatility is elevated – expect bigger swings; use smaller positions.")
+    blocks.append(head("Outlook") + "\n" + esc("\n".join(out)) + "\n\n" + TAGLINE)
+    return Html("\n\n".join(blocks))

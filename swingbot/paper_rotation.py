@@ -28,6 +28,7 @@ from .data import load_full_universe
 from .indicators import sma
 from .notify import Notifier
 from .portfolio import rotation_inputs, rotation_orders
+from .tgfmt import TAGLINE, Html, esc, head, kv, pre, title
 
 
 def _f(x: float) -> str:
@@ -127,15 +128,18 @@ class RotationPaperTracker:
             raise RuntimeError("could not download NIFTY data - check internet / data provider")
         days = index_df.index
         bar_day = days[-1]
-        if st and st.get("last_bar") == str(bar_day.date()):
-            msg = f"(repeat) {st.get('last_message', 'No new market data.')}"
-            if send and self.n:
-                self.sent_ok = self.n.send(msg)
-            return msg
-
         feats, score, regime_on = rotation_inputs(raw, index_df, self.min_value_cr, self.min_price, regime_sma=self.regime_sma)
         closes = pd.DataFrame({s: f["close"] for s, f in feats.items()}).reindex(days).ffill()
         opens = pd.DataFrame({s: f["open"] for s, f in feats.items()}).reindex(days)
+        if st and st.get("last_bar") == str(bar_day.date()):  # no new candle: re-show the report, change nothing
+            try:
+                msg = Html("<i>(repeat) No new market data since the last report.</i>\n\n"
+                           + self._report(st, index_df, closes, regime_on, uni, [], bar_day))
+            except KeyError:  # a holding without price data: fall back to the saved text
+                msg = f"(repeat) {st.get('last_message', 'No new market data.')}"
+            if send and self.n:
+                self.sent_ok = self.n.send(msg)
+            return msg
         log: list[str] = []
 
         if st is None:  # first run: start in cash, adopt the strategy's current target if the regime was on
@@ -174,14 +178,15 @@ class RotationPaperTracker:
         st["last_bar"] = str(bar_day.date())
 
         msg = self._report(st, index_df, closes, regime_on, uni, log, bar_day)
-        st["last_message"] = msg
+        st["last_message"] = str(msg)
+        st["last_message_html"] = True
         self.save(st)
         if send and self.n:
             self.sent_ok = self.n.send(msg)
         return msg
 
     # ---------------------------------------------------------------- report
-    def _report(self, st, index_df, closes, regime_on, sectors, log, bar_day) -> str:
+    def _report(self, st, index_df, closes, regime_on, sectors, log, bar_day) -> Html:
         nifty = float(index_df["close"].iloc[-1])
         m = sma(index_df["close"], self.regime_sma)
         rising = bool(m.iloc[-1] > m.iloc[-21])
@@ -192,48 +197,52 @@ class RotationPaperTracker:
         start = date.fromisoformat(st["start_date"])
         review = start + timedelta(days=30 * self.review_months)
         on = bool(regime_on.iloc[-1])
-        lines = [
-            f"📁 OPTION B PAPER PORTFOLIO · {bar_day:%a %d %b %Y}",
-            "🧪 Paper test of the monthly momentum strategy - no real orders",
-            "",
-            (f"🟢 Market: UPTREND - NIFTY {nifty:,.0f} above its 200-day avg {m.iloc[-1]:,.0f}" if on else
-             f"🔴 Market: DOWNTREND - NIFTY {nifty:,.0f} below its {'rising' if rising else 'falling'} "
-             f"200-day avg {m.iloc[-1]:,.0f} -> stay in cash"),
-            f"💼 Value {_f(equity)} ({ret:+.1f}%) · NIFTY {n_ret:+.1f}% since {start:%d %b}",
-            f"📉 Drop from peak: now {dd_now:.1f}% · worst {st['max_dd_pct']:.1f}% (limit {self.dd_limit:g}%)",
-            "",
-        ]
+        B = [title("Option B · Paper Portfolio", f"{bar_day:%a, %d %b %Y} · monthly momentum · no real orders")]
+        B.append(head("Market", "UPTREND" if on else "DOWNTREND") + "\n" + esc(
+            f"NIFTY {nifty:,.0f} above its 200-day avg {m.iloc[-1]:,.0f}." if on else
+            f"NIFTY {nifty:,.0f} below its {'rising' if rising else 'falling'} 200-day avg {m.iloc[-1]:,.0f}. "
+            "Stay in cash."))
+        B.append(head("Performance", f"since {start:%d %b %Y}") + "\n" + kv([
+            ("Value", f"{_f(equity):>10}"), ("Return", f"{ret:>+9.1f}%"), ("NIFTY", f"{n_ret:>+9.1f}%"),
+            ("Drawdown", f"{dd_now:>9.1f}%"), ("Worst drop", f"{st['max_dd_pct']:>9.1f}%"),
+            ("Limit", f"{self.dd_limit:>9.1f}%")], 13))
         if st["holdings"]:
-            lines.append(f"📦 Holdings {len(st['holdings'])}/{self.top_n} · cash {_f(st['cash'])}")
-            sec_count: dict[str, int] = {}
+            rows, sec_count = [], {}
             for sym, h in sorted(st["holdings"].items()):
                 px = float(closes.at[bar_day, sym])
                 chg = (px / h['entry_price'] - 1) * 100
-                lines.append(f"   {'🟢' if chg >= 0 else '🔴'} {sym} ×{h['qty']}: ₹{h['entry_price']:,.2f} → ₹{px:,.2f} ({chg:+.1f}%)")
+                rows += [f"{sym + ' x' + str(h['qty']):<22}{chg:>+7.1f}%", f"  {h['entry_price']:,.2f} → {px:,.2f}"]
                 sec = sectors.get(sym, "UNKNOWN")
                 sec_count[sec] = sec_count.get(sec, 0) + 1
-            heavy = [f"{k} ×{v}" for k, v in sec_count.items() if v >= 3]
+            heavy = [f"{k} x{v}" for k, v in sec_count.items() if v >= 3]
+            hold = head("Holdings", f"{len(st['holdings'])}/{self.top_n} · cash {_f(st['cash'])}") + "\n" + pre(rows)
             if heavy:
-                lines.append("   ⚠️ Concentrated in: " + ", ".join(heavy))
+                hold += "\n" + esc("Concentrated in: " + ", ".join(heavy))
         else:
-            lines.append(f"📦 Holdings: none - 100% cash ({_f(st['cash'])}) 💤")
+            hold = head("Holdings", f"0/{self.top_n}") + "\n" + esc(f"None. 100% cash ({_f(st['cash'])}).")
+        B.append(hold)
         if st.get("pending"):
             p = st["pending"]
-            lines.append(f"⏭️ Next open (paper): sell {', '.join(p['sells']) or '-'} · buy {', '.join(p['buys']) or '-'}")
+            B.append(head("Next Open", "paper") + "\n" + esc(f"Sell: {', '.join(p['sells']) or '-'}\n"
+                                                              f"Buy: {', '.join(p['buys']) or '-'}"))
         if log:
-            lines += ["", "📝 Today:"] + [f"   • {x}" for x in log]
-        checks = [
-            f"{'✅' if ret >= n_ret else '❌'} vs NIFTY: {ret - n_ret:+.1f} points",
-            f"{'✅' if st['max_dd_pct'] <= self.dd_limit else '❌'} worst drop {st['max_dd_pct']:.1f}% (limit {self.dd_limit:g}%)",
-        ]
+            B.append(head("Today") + "\n" + esc("\n".join(f"- {x}" for x in log)))
+        worst = st["max_dd_pct"]
+        vs = f"{ret - n_ret:+.1f} pts"
+        wd = f"{worst:.1f}%"
+        rows = [f"{'vs NIFTY':<13}{vs:<11}{'PASS' if ret >= n_ret else 'FAIL'}",
+                f"{'Worst drop':<13}{wd:<11}{'PASS' if worst <= self.dd_limit else 'FAIL'}"]
+        score = head("Scorecard", f"first review {review:%d %b %Y}") + "\n" + pre(rows)
         closed = st.get("closed", [])
         if closed:
             wins = sum(1 for c in closed if c["pnl"] > 0)
-            checks.append(f"📊 closed trades {len(closed)} · winners {wins} · total P&L {_f(sum(c['pnl'] for c in closed))}")
-        lines += ["", f"🏁 Scorecard (first review {review:%d %b %Y}):"] + [f"   {c}" for c in checks]
+            score += "\n" + esc(f"Closed trades {len(closed)} · winners {wins} · "
+                                f"total P&L {_f(sum(c['pnl'] for c in closed))}")
         if st["max_dd_pct"] > self.dd_limit:
-            lines.append("🚨 Drawdown limit breached - under the risk rules this strategy would be PAUSED for review.")
-        return "\n".join(lines)
+            score += "\n<b>ALERT</b> " + esc("Drawdown limit breached – under the risk rules this strategy "
+                                             "would be PAUSED for review.")
+        B.append(score + "\n\n" + TAGLINE)
+        return Html("\n\n".join(B))
 
 
 __all__ = ["RotationPaperTracker"]

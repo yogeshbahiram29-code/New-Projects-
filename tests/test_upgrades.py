@@ -75,11 +75,17 @@ def test_market_dashboard():
     assert b["n"] > 0 and 0 <= b["above200"] <= 100 and b["adv"] + b["dec"] <= b["n"]
     assert len(sector_strength(stocks, sectors, when)) >= 6
     fake = idx.iloc[-60:].copy()
-    text = market_dashboard(stocks, idx, sectors, {"INDIAVIX": fake.assign(close=22.0), "SP500": fake, "USDINR": fake})
-    for part in ("🌍 MARKET DASHBOARD", "📊 MARKET BREADTH", "🏆 STRONGEST SECTORS", "🌐 GLOBAL CUES",
-                 "😨 India VIX: 22.0", "🧭 WHAT IT MEANS", "Volatility is elevated"):
+    from swingbot.tgfmt import plain
+
+    text = plain(market_dashboard(stocks, idx, sectors, {"INDIAVIX": fake.assign(close=22.0), "SP500": fake,
+                                                          "USDINR": fake}))
+    for part in ("MARKET DASHBOARD", "INDICES", "BREADTH", "STRONGEST", "WEAKEST", "GLOBAL CUES",
+                 "Volatility: elevated", "OUTLOOK", "Volatility is elevated"):
         assert part in text, part
-    assert "🌐 GLOBAL CUES" not in market_dashboard(stocks, idx, sectors, {})  # missing global data is skipped
+    import re
+
+    assert re.search(r"INDIA VIX\s+22\.0", text)
+    assert "GLOBAL CUES" not in plain(market_dashboard(stocks, idx, sectors, {}))  # missing global data is skipped
 
 
 def test_watchlist_shows_odds_and_fundamentals():
@@ -88,10 +94,14 @@ def test_watchlist_shows_odds_and_fundamentals():
                           "t1": 555.0, "t1_pct": 9.9, "t2": 580.0, "t2_pct": 14.9}])
     odds = {"X": {"period": "2015-2026", "cases": 1240, "target_first_pct": 41.0, "stop_first_pct": 47.0,
                   "neither_pct": 12.0, "avg_r": 0.15, "triggered_pct": 38.0}}
-    text = format_picks(pick, {}, True, pd.Timestamp("2026-11-02"), odds=odds,
-                        fundamentals={"X": {"marketCap": 1e11, "trailingPE": 30.0, "returnOnEquity": 0.2}})
-    assert "🎲 History (2015-2026, 1,240 similar cases): 🎯 T1 first 41%" in text
-    assert "🏢 Fundamentals: MCap ₹10,000 Cr | P/E 30.0 | ROE 20%" in text
+    from swingbot.tgfmt import plain
+
+    text = plain(format_picks(pick, {}, True, pd.Timestamp("2026-11-02"), odds=odds,
+                              fundamentals={"X": {"marketCap": 1e11, "trailingPE": 30.0, "returnOnEquity": 0.2}}))
+    assert "2015-2026 · 1,240 similar cases" in text and "T1 first    41%" in text and "SL first    47%" in text
+    assert "Average R   +0.15 before costs" in text and "Edge        THIN (cost risk)" in text
+    assert "Market cap    ₹10,000 Cr" in text and "P/E           30.0" in text and "ROE           20%" in text
+    assert "FINAL DECISION: BUY WATCH" in text  # market ON, 1 conflict (thin edge)
 
 
 def test_unfinished_bar_dropped_only_during_market_hours():

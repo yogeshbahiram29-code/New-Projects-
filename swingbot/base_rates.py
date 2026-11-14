@@ -201,6 +201,11 @@ def lookup(table: pd.DataFrame | None, setup: str, score: float, regime_on: bool
     return None
 
 
+def edge_level(avg_r: float) -> str:
+    """'positive' / 'thin' / 'none' - the label shown next to the historical average R."""
+    return "positive" if avg_r >= 0.25 else "thin" if avg_r >= 0.05 else "none"
+
+
 def format_odds(o: dict | None) -> list[str]:
     if not o:
         return ["🎲 Odds: not enough history yet (run Actions → Refresh odds)."]
@@ -208,8 +213,8 @@ def format_odds(o: dict | None) -> list[str]:
     return [f"🎲 History ({o['period']}, {int(o['cases']):,} similar cases): 🎯 T1 first {o['target_first_pct']:.0f}% | "
             f"🔴 SL first {o['stop_first_pct']:.0f}% | ⏳ neither {o['neither_pct']:.0f}%",
             f"   Avg {avg:+.2f}R before charges · triggered {o['triggered_pct']:.0f}% of the time · "
-            + ("✅ positive edge" if avg >= 0.25 else "⚠️ thin edge – charges may erase it" if avg >= 0.05
-               else "❌ no real edge")]
+            + {"positive": "✅ positive edge", "thin": "⚠️ thin edge – charges may erase it",
+               "none": "❌ no real edge"}[edge_level(avg)]]
 
 
-__all__ = ["build_events", "signal_features", "FEATURE_COLS", "summarize", "lookup", "format_odds", "evaluate_candidate", "simulate", "score_band"]
+__all__ = ["edge_level", "build_events", "signal_features", "FEATURE_COLS", "summarize", "lookup", "format_odds", "evaluate_candidate", "simulate", "score_band"]

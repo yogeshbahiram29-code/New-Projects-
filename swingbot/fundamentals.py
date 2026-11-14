@@ -63,25 +63,29 @@ def assess(f: dict | None, sector: str = "") -> tuple[list[str], list[str]]:
     return warn, good
 
 
-def format_fundamentals(f: dict | None, sector: str = "") -> list[str]:
-    if not f:
-        return ["🏢 Fundamentals: not available today (data source busy) - check screener.in / the annual report."]
-
+def fundamental_fields(f: dict) -> dict[str, str]:
+    """Display values: market cap, P/E, ROE, debt/equity, profit growth ('n/a' when missing)."""
     def pct(x):
         if x is None:
             return "n/a"
         v = round(x * 100)
         return "0%" if v == 0 else f"{v:+d}%"
 
-    mcap = f.get("marketCap")
-    de = f.get("debtToEquity")
-    parts = [
-        f"MCap ₹{mcap / 1e7:,.0f} Cr" if mcap else "MCap n/a",
-        f"P/E {f['trailingPE']:.1f}" if f.get("trailingPE") else "P/E n/a",
-        f"ROE {f['returnOnEquity'] * 100:.0f}%" if f.get("returnOnEquity") is not None else "ROE n/a",
-        f"D/E {de / 100:.2f}" if de is not None else "D/E n/a",
-        f"Profit growth {pct(f.get('earningsGrowth'))}",
-    ]
+    mcap, de = f.get("marketCap"), f.get("debtToEquity")
+    return {
+        "mcap": f"₹{mcap / 1e7:,.0f} Cr" if mcap else "n/a",
+        "pe": f"{f['trailingPE']:.1f}" if f.get("trailingPE") else "n/a",
+        "roe": f"{f['returnOnEquity'] * 100:.0f}%" if f.get("returnOnEquity") is not None else "n/a",
+        "de": f"{de / 100:.2f}" if de is not None else "n/a",  # Yahoo reports debt/equity in %
+        "growth": pct(f.get("earningsGrowth")),
+    }
+
+
+def format_fundamentals(f: dict | None, sector: str = "") -> list[str]:
+    if not f:
+        return ["🏢 Fundamentals: not available today (data source busy) - check screener.in / the annual report."]
+    v = fundamental_fields(f)
+    parts = [f"MCap {v['mcap']}", f"P/E {v['pe']}", f"ROE {v['roe']}", f"D/E {v['de']}", f"Profit growth {v['growth']}"]
     lines = ["🏢 Fundamentals: " + " | ".join(parts)]
     warn, good = assess(f, sector)
     if warn:

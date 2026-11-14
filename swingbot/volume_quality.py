@@ -100,6 +100,11 @@ def fetch_delivery(trading_days: list[date], symbols: list[str], max_days: int =
     return got if files else None
 
 
+def delivery_level(avg: float) -> str | None:
+    """'high' (>= 55%: genuine investor buying) / 'low' (< 30%: mostly short-term trading) / None."""
+    return "high" if avg >= 55 else "low" if avg < 30 else None
+
+
 def format_volume(p: dict | None, deliveries: list[float] | None, delivery_ok: bool) -> list[str]:
     if not p:
         return []
@@ -109,7 +114,8 @@ def format_volume(p: dict | None, deliveries: list[float] | None, delivery_ok: b
     if deliveries:
         avg = sum(deliveries) / len(deliveries)
         lines.append(f"📦 Delivery: {deliveries[0]:.0f}% latest | {len(deliveries)}-day avg {avg:.0f}%"
-                     + (" – strong investor buying" if avg >= 55 else " – mostly short-term trading" if avg < 30 else ""))
+                     + {"high": " – strong investor buying", "low": " – mostly short-term trading",
+                        None: ""}[delivery_level(avg)])
     elif not delivery_ok:
         lines.append("📦 Delivery %: not available today (NSE blocks cloud servers) – check nseindia.com.")
     return lines

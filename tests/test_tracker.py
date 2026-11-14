@@ -79,9 +79,11 @@ def test_ledger_lifecycle_and_repeats(tmp_path):
     assert changed.iloc[0]["status"] == "WORKED"
     card = scorecard(led)
     assert card["n"] == 2 and card["closed"] == 1 and card["worked"] == 1 and card["exp_hit_pct"] == 25.0
-    txt = format_tracker(led, changed, card, [], "2026-11-04")
-    assert "✅ WORKED: AAA hit Target 1 ₹113.00 (+2.0R in 2 days)" in txt
-    assert "✅ No uncertainty alerts today." in txt and "need 10+" in txt
+    from swingbot.tgfmt import plain
+
+    txt = plain(format_tracker(led, changed, card, [], "2026-11-04"))
+    assert "WORKED     AAA        +2.0R 2d" in txt
+    assert "RISK ALERTS\nNone today." in txt and "Need 10+" in txt
 
 
 def test_same_day_rerun_replaces_list():
@@ -136,14 +138,14 @@ def test_alerts_market_data_and_open_trades():
 
 
 def test_pick_uncertainty_line():
-    assert format_pick_uncertainty([]).startswith("✅ Confidence check")
+    assert format_pick_uncertainty([]).startswith("Uncertainty: LOW")
     r = pick_uncertainty({"verdict": "DISTRIBUTION"}, {"avg_r": 0.03}, True, {"trailingPE": 300.0}, True, "IT",
                          SimpleNamespace(ok=True, flags=["📅 results/board meeting"]))
     assert r == ["money flowing out (distribution)", "history shows no real edge",
                  "fundamental red flag (very expensive)", "results/board meeting – gap risk"]
-    assert format_pick_uncertainty(r).startswith("🔴 High uncertainty: money flowing out")
+    assert format_pick_uncertainty(r).startswith("Uncertainty: HIGH – money flowing out")
     assert pick_uncertainty(None, None, True) == ["too little history for this setup"]
-    assert format_pick_uncertainty(pick_uncertainty(None, {"avg_r": 0.1}, True)).startswith("🟡 Uncertainty: thin")
+    assert format_pick_uncertainty(pick_uncertainty(None, {"avg_r": 0.1}, True)).startswith("Uncertainty: MEDIUM – thin")
 
 
 def test_fill_expectations_for_rebuilt_rows():

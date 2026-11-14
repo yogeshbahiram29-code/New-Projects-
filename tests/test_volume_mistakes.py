@@ -113,20 +113,29 @@ def test_check_sell_and_feedback(tmp_path):
     assert any(x.startswith("Early exit") for x in check_sell(s, "ABC", 101.0, 95.0, 110.0, None, "fear"))
     assert check_sell(s, "ABC", 110.5, 95.0, 110.0, "2026-10-28", "calm", "yes", today=date(2026, 11, 4)) == []
     txt = feedback("BUY", "ABC", 20, 100.2, 95.0, 110.0, ["Chased: paid 3.0% above"])
-    assert "📒 TRADE RECORDED" in txt and "⚠️ MISTAKE CHECK: 1 issue(s)" in txt and "💡 Place the stop-limit" in txt
-    assert "✅ MISTAKE CHECK: no issues" in feedback("SELL", "ABC", 20, 110.5, 95.0, 110.0, [], pnl=180.0)
+    from swingbot.tgfmt import plain
+
+    txt = plain(txt)
+    assert "TRADE RECORDED" in txt and "MISTAKE CHECK  1 issue(s)" in txt and "Tip: Place the stop-limit" in txt
+    ok = plain(feedback("SELL", "ABC", 20, 110.5, 95.0, 110.0, [], pnl=180.0))
+    assert "No issues – rules followed" in ok and "₹180 after charges" in ok
 
 
 def test_weekly_review(tmp_path):
     s = _settings(tmp_path)
     today = date(2026, 11, 7)
-    assert "No trades recorded this week" in weekly_review(s, tmp_path, today)
+    import re
+
+    from swingbot.tgfmt import plain
+
+    assert "No trades recorded this week" in plain(weekly_review(s, tmp_path, today))
     append_log(tmp_path, {"time": "2026-11-03T10:00:00", "action": "BUY", "symbol": "ABC", "qty": 20, "price": 104,
                           "pnl": "", "mistakes": "Chased: x | Emotion: traded on FOMO"})
     append_log(tmp_path, {"time": "2026-11-05T10:00:00", "action": "SELL", "symbol": "ABC", "qty": 20, "price": 96,
                           "pnl": -175.0, "mistakes": ""})
     append_log(tmp_path, {"time": "2026-10-01T10:00:00", "action": "BUY", "symbol": "OLD", "qty": 1, "price": 1,
                           "pnl": "", "mistakes": "Revenge: x"})  # older than a week -> ignored
-    txt = weekly_review(s, tmp_path, today)
-    assert "🟢 Buys: 1 | 🔴 Sells: 1" in txt and "Closed P&L: ₹-175" in txt and "Discipline score: 50%" in txt
-    assert "• Chased ×1" in txt and "Revenge" not in txt and "FOCUS FOR NEXT WEEK" in txt
+    txt = plain(weekly_review(s, tmp_path, today))
+    assert re.search(r"Buys\s+1", txt) and re.search(r"Sells\s+1", txt) and re.search(r"Closed P&L\s+₹-175", txt)
+    assert re.search(r"Discipline\s+50%", txt) and re.search(r"Chased\s+x1", txt)
+    assert "Revenge" not in txt and "FOCUS NEXT WEEK" in txt

@@ -159,66 +159,71 @@ def check_sell(settings, symbol: str, price: float, stop: float | None, target: 
     return m + _emotion_flags(emotion, followed_plan)
 
 
-def feedback(action: str, symbol: str, qty: int, price: float, stop, target, mistakes: list[str], pnl=None) -> str:
-    L = ["📒 TRADE RECORDED", f"{'🟢 BUY' if action == 'BUY' else '🔴 SELL'} {qty} {symbol} @ ₹{price:,.2f}"]
+def feedback(action: str, symbol: str, qty: int, price: float, stop, target, mistakes: list[str], pnl=None):
+    from .tgfmt import TAGLINE, Html, esc, head, kv, title
+
+    B = [title("Trade Recorded", f"{action} {qty} {symbol} @ ₹{price:,.2f}")]
     if action == "BUY":
-        L.append(f"🛑 Stop ₹{stop:,.2f} · 🎯 Target ₹{target:,.2f}" if stop and target else "🛑 Stop: NOT SET ⚠️")
-        L.append("➡️ Set the GTT stop-loss in the app now if you haven't.")
+        B.append(kv([("Stop loss", f"₹{stop:,.2f}" if stop else "NOT SET"),
+                     ("Target", f"₹{target:,.2f}" if target else "NOT SET")], 11)
+                 + "\n" + esc("Set the GTT stop-loss in the app now if you haven't."))
     elif pnl is not None:
-        L.append(f"💰 P&L ₹{pnl:,.0f} after charges")
-    L.append("")
+        B.append(kv([("P&L", f"₹{pnl:,.0f} after charges")], 11))
     if mistakes:
-        L.append(f"⚠️ MISTAKE CHECK: {len(mistakes)} issue(s)")
-        for x in mistakes:
-            L.append(f"• {x}")
+        rows = []
+        for i, x in enumerate(mistakes, 1):
+            rows.append(f"{i}. {x}")
             tip = TIPS.get(x.split(":")[0])
             if tip:
-                L.append(f"  💡 {tip}")
+                rows.append(f"   Tip: {tip}")
+        B.append(head("Mistake Check", f"{len(mistakes)} issue(s)") + "\n" + esc("\n".join(rows)))
     else:
-        L.append("✅ MISTAKE CHECK: no issues – rules followed. Well done.")
-    L += ["", "📊 Discipline First | Capital Protection Always."]
-    return "\n".join(L)
+        B.append(head("Mistake Check") + "\n" + esc("No issues – rules followed. Well done."))
+    B.append(TAGLINE)
+    return Html("\n\n".join(B))
 
 
-def weekly_review(settings, journal: Path, today: date | None = None) -> str:
+def weekly_review(settings, journal: Path, today: date | None = None):
+    from .tgfmt import TAGLINE, Html, esc, head, kv, title
+
     today = today or date.today()
     start = today - timedelta(days=7)
     log = load_log(journal)
     wk = log[pd.to_datetime(log["time"]).dt.date >= start] if len(log) else log
-    L = ["📒 WEEKLY DISCIPLINE REVIEW", f"📅 {start:%d %b} – {today:%d %b %Y}", "", "━━━━━━━━━━━━━━━━━━"]
+    B = [title("Weekly Discipline Review", f"{start:%d %b} – {today:%d %b %Y}")]
     if wk.empty:
-        L += ["No trades recorded this week.",
-              "✅ Not trading is fine – waiting for good setups and a green market filter IS the strategy.",
-              "", "💡 Recorded a real trade? Use Actions → Record trade so the bot can check it."]
+        B.append(esc("No trades recorded this week.\n"
+                     "Not trading is fine – waiting for good setups and a green market filter IS the strategy.\n"
+                     "Recorded a real trade? Use Actions → Record trade so the bot can check it."))
     else:
         buys, sells = int((wk["action"] == "BUY").sum()), int((wk["action"] == "SELL").sum())
         pnl = pd.to_numeric(wk.loc[wk["action"] == "SELL", "pnl"], errors="coerce").dropna()
         flagged = wk["mistakes"].fillna("").str.len() > 0
         score = (1 - flagged.mean()) * 100
-        L += [f"🟢 Buys: {buys} | 🔴 Sells: {sells}"]
+        rows = [("Buys", f"{buys}"), ("Sells", f"{sells}")]
         if len(pnl):
-            L.append(f"💰 Closed P&L: ₹{pnl.sum():,.0f} · winners {int((pnl > 0).sum())}/{len(pnl)}")
-        L.append(f"🎯 Discipline score: {score:.0f}% of trades with no mistakes")
+            rows += [("Closed P&L", f"₹{pnl.sum():,.0f}"), ("Winners", f"{int((pnl > 0).sum())}/{len(pnl)}")]
+        rows.append(("Discipline", f"{score:.0f}%"))
+        B.append(head("Trades") + "\n" + kv(rows, 13) + "\n" + esc("Discipline = share of trades with no mistakes."))
         counts: dict[str, int] = {}
         for ms in wk["mistakes"].fillna(""):
             for x in [y for y in ms.split(" | ") if y]:
                 key = x.split(":")[0]
                 counts[key] = counts.get(key, 0) + 1
         if counts:
-            L += ["", "⚠️ MISTAKES THIS WEEK"]
-            for k, v in sorted(counts.items(), key=lambda kv: -kv[1]):
-                L.append(f"• {k} ×{v}")
+            B.append(head("Mistakes This Week") + "\n" + kv(
+                [(k, f"x{v}") for k, v in sorted(counts.items(), key=lambda kv_: -kv_[1])], 20))
             top = max(counts, key=counts.get)
-            L += ["", f"💡 FOCUS FOR NEXT WEEK: {top}", f"   {TIPS.get(top, 'Follow the written plan.')}"]
+            B.append(head("Focus Next Week", top) + "\n" + esc(TIPS.get(top, "Follow the written plan.")))
         else:
-            L += ["", "✅ No mistakes this week – keep it up!"]
+            B.append(esc("No mistakes this week – keep it up."))
     paper = journal / "paper_rotation.json"
     if paper.exists():
         st = json.loads(paper.read_text())
         if st.get("history"):
             eq, nifty = st["history"][-1][1], st["history"][-1][2]
-            L += ["", "━━━━━━━━━━━━━━━━━━",
-                  f"📁 Option B paper: {(eq / st['start_capital'] - 1) * 100:+.1f}% vs NIFTY "
-                  f"{(nifty / st['start_nifty'] - 1) * 100:+.1f}% since {st['start_date']}"]
-    L += ["", "━━━━━━━━━━━━━━━━━━", "📊 Discipline First | Capital Protection Always."]
-    return "\n".join(L)
+            B.append(head("Option B") + "  " + esc(
+                f"paper {(eq / st['start_capital'] - 1) * 100:+.1f}% vs NIFTY "
+                f"{(nifty / st['start_nifty'] - 1) * 100:+.1f}% since {st['start_date']}"))
+    B.append(TAGLINE)
+    return Html("\n\n".join(B))
