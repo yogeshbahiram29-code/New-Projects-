@@ -200,8 +200,8 @@ class RotationPaperTracker:
         B = [title("Option B · Paper Portfolio", f"{bar_day:%a, %d %b %Y} · monthly momentum · no real orders")]
         B.append(head("Market", "UPTREND" if on else "DOWNTREND") + "\n" + esc(
             f"NIFTY {nifty:,.0f} above its 200-day avg {m.iloc[-1]:,.0f}." if on else
-            f"NIFTY {nifty:,.0f} below its {'rising' if rising else 'falling'} 200-day avg {m.iloc[-1]:,.0f}. "
-            "Stay in cash."))
+            f"NIFTY {nifty:,.0f} {'below' if nifty < m.iloc[-1] else 'above'} its "
+            f"{'rising' if rising else 'falling'} 200-day avg {m.iloc[-1]:,.0f}. Stay in cash."))
         B.append(head("Performance", f"since {start:%d %b %Y}") + "\n" + kv([
             ("Value", f"{_f(equity):>10}"), ("Return", f"{ret:>+9.1f}%"), ("NIFTY", f"{n_ret:>+9.1f}%"),
             ("Drawdown", f"{dd_now:>9.1f}%"), ("Worst drop", f"{st['max_dd_pct']:>9.1f}%"),

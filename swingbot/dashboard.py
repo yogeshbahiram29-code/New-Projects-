@@ -131,7 +131,8 @@ def market_dashboard(raw: dict[str, pd.DataFrame], index_df: pd.DataFrame, secto
     elif a200 < 40:
         out = ["Risk-off. Index in downtrend and most stocks below their 200 DMA – protect capital, no fresh buying."]
     else:
-        out = ["Mixed. Index below its trend line – wait for the market filter to turn ON."]
+        out = ["Mixed. Market filter OFF (index below its 200 DMA, or the 200 DMA still falling) – "
+               "wait for it to turn ON."]
     if vix_lvl is not None and vix_lvl >= 20:
         out.append("Volatility is elevated – expect bigger swings; use smaller positions.")
     blocks.append(head("Outlook") + "\n" + esc("\n".join(out)) + "\n\n" + TAGLINE)
