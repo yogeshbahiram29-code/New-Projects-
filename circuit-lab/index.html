@@ -14,15 +14,75 @@
   #props input[type=number] { width: 100%; }
   .warn { color: var(--warn); font-weight: 600; }
   .good { color: var(--good); font-weight: 600; }
+  .modes { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+  .modes button { border: 0; padding: 5px 14px; }
+  [hidden] { display: none !important; }
+  #agentView { max-width: 1100px; margin: 0 auto; padding: 36px 16px 48px; }
+  .hero { text-align: center; }
+  .hero h2 { font-size: clamp(28px, 5vw, 44px); line-height: 1.1; margin: 0 0 8px; letter-spacing: -.02em; }
+  .hero p { margin: 0 auto 22px; max-width: 620px; }
+  .ask { max-width: 760px; margin: 0 auto; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; text-align: left; }
+  .ask:focus-within { border-color: var(--accent); }
+  .ask textarea { width: 100%; min-height: 84px; resize: vertical; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 16px; }
+  .ask .bar { display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap; }
+  .badge { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 14px auto 0; max-width: 860px; }
+  .chips button { font-size: 13px; border-radius: 999px; }
+  .chips .lead { color: var(--muted); font-size: 13px; width: 100%; text-align: center; }
+  .studio-link { text-align: center; margin-top: 14px; font-size: 14px; color: var(--muted); }
+  .studio-link button { border: 0; background: none; color: var(--ink); font-weight: 600; text-decoration: underline; padding: 0 2px; }
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; margin: 40px 0 12px; gap: 12px; flex-wrap: wrap; }
+  .section-head h2 { margin: 0; font-size: 22px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+  .tcard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; cursor: pointer; text-align: left; padding: 0; display: flex; flex-direction: column; }
+  .tcard:hover { border-color: var(--accent); }
+  .tcard canvas { border: 0; border-radius: 0; border-bottom: 1px solid var(--line); aspect-ratio: 16 / 10; }
+  .tcard .meta { padding: 10px 12px 12px; }
+  .tcard b { display: block; margin-bottom: 2px; }
+  .tcard span { font-size: 13px; color: var(--muted); }
+  .recent { display: grid; gap: 8px; }
+  .recent .item { display: flex; gap: 10px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+  .recent .item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #about { border-left: 4px solid var(--accent); padding: 8px 10px; margin-bottom: 12px; background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: 4px; }
+  #about p { margin: 6px 0 0; }
+  .busy { opacity: .6; pointer-events: none; }
 </style>
 </head>
 <body>
 <header class="top">
   <a class="home" href="../index.html">← Science Studio</a>
   <h1>Circuit Lab</h1>
-  <span class="sub">Pick a part, then drag between two dots on the board to place it.</span>
+  <div class="modes" role="tablist">
+    <button id="modeAgent" role="tab">Builder</button>
+    <button id="modeStudio" role="tab">Studio</button>
+  </div>
+  <span class="sub" id="modeHint"></span>
 </header>
-<div class="layout">
+
+<main id="agentView">
+  <div class="hero">
+    <h2>What do you want to build?</h2>
+    <p class="muted">Describe a circuit in plain words. It gets wired up on the board, ready to simulate and tweak.</p>
+  </div>
+  <div class="ask">
+    <textarea id="prompt" placeholder="e.g. Three LEDs, red, green and blue, each with its own resistor, on a 9 V battery with an on/off switch"></textarea>
+    <div class="bar">
+      <span class="badge" id="builderBadge">Offline builder</span>
+      <button class="primary" id="buildBtn">Build circuit ↑</button>
+    </div>
+  </div>
+  <p class="small warn" id="buildMsg" hidden></p>
+  <div class="chips" id="chips"><span class="lead">Or try</span></div>
+  <p class="studio-link">Rather build it by hand? <button id="openStudio">Open the studio →</button></p>
+
+  <div class="section-head"><h2>Templates</h2><span class="muted small">Click one to open it in the studio</span></div>
+  <div class="cards" id="templates"></div>
+
+  <div class="section-head"><h2>Your projects</h2><span class="muted small">Saved in this browser</span></div>
+  <div class="recent" id="recent"></div>
+</main>
+
+<div class="layout" id="studioView">
   <aside class="panel">
     <h2>Parts</h2>
     <div class="tools" id="tools"></div>
@@ -30,7 +90,9 @@
     <h3>Example circuits</h3>
     <div class="stack" id="examples"></div>
     <h3>Board</h3>
+    <input id="projName" type="text" placeholder="Project name" style="width:100%;margin-bottom:8px;font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 10px">
     <div class="row">
+      <button id="saveBtn">Save project</button>
       <button id="clear">Clear board</button>
       <label class="small row" style="gap:6px"><input type="checkbox" id="showV" checked> Voltage colours</label>
     </div>
@@ -44,6 +106,7 @@
     </div>
   </section>
   <aside class="panel">
+    <div id="about" hidden></div>
     <h2>Inspector</h2>
     <div id="props" class="small"><p class="muted">Select a part to see its voltage, current and power.</p></div>
     <h3>Circuit status</h3>
@@ -249,7 +312,7 @@
   });
   cv.addEventListener('pointerleave', () => { hoverPt = null; cv._mouse = null; });
   window.addEventListener('keydown', e => {
-    if ((e.key === 'Delete' || e.key === 'Backspace') && selected && document.activeElement.tagName !== 'INPUT') {
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selected && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
       parts = parts.filter(p => p !== selected); selected = null; renderProps();
     }
   });
@@ -502,6 +565,36 @@
       addPart('battery', P(5, 10), P(5, 4), { value: 6 }); addPart('switch', P(5, 4), P(11, 4));
       addPart('motor', P(11, 4), P(11, 10)); addPart('wire', P(11, 10), P(5, 10));
     },
+    'LED light bar': () => {
+      addPart('battery', P(3, 11), P(3, 3));
+      [7, 11, 15].forEach((x, i) => {
+        addPart('wire', P(x - 4, 3), P(x, 3)); addPart('wire', P(x - 4, 11), P(x, 11));
+        addPart('resistor', P(x, 3), P(x, 6), { value: 470 });
+        addPart('led', P(x, 6), P(x, 9), { color: LED_COLORS[i] }); addPart('wire', P(x, 9), P(x, 11));
+      });
+    },
+    'Fan speed control': () => {
+      addPart('battery', P(3, 10), P(3, 4)); addPart('switch', P(3, 4), P(7, 4));
+      addPart('resistor', P(7, 4), P(12, 4), { value: 22 });
+      addPart('wire', P(7, 4), P(7, 2)); addPart('switch', P(7, 2), P(12, 2), { closed: false }); addPart('wire', P(12, 2), P(12, 4));
+      addPart('wire', P(12, 4), P(16, 4)); addPart('motor', P(16, 4), P(16, 10)); addPart('wire', P(16, 10), P(3, 10));
+    },
+    'Capacitor flash': () => {
+      addPart('battery', P(2, 10), P(2, 4)); addPart('switch', P(2, 4), P(6, 4));
+      addPart('resistor', P(6, 4), P(10, 4), { value: 220 }); addPart('capacitor', P(10, 4), P(10, 10), { value: 4700 });
+      addPart('wire', P(10, 10), P(2, 10)); addPart('wire', P(10, 4), P(14, 4));
+      addPart('resistor', P(14, 4), P(14, 7), { value: 100 }); addPart('led', P(14, 7), P(14, 10)); addPart('wire', P(14, 10), P(10, 10));
+    },
+  };
+  const TEMPLATE_INFO = {
+    'Simple bulb circuit': 'A battery, a bulb and a switch: the classic first circuit.',
+    'Series vs parallel bulbs': 'The same two bulbs wired two ways. Which pair shines brighter?',
+    'LED with resistor': 'Why every LED needs a resistor to limit its current.',
+    'RC charging': 'Close the switch and watch a capacitor charge through a resistor.',
+    'Motor with switch': 'A 6 V battery spinning a small DC motor.',
+    'LED light bar': 'Red, green and blue LEDs in parallel, each with its own resistor.',
+    'Fan speed control': 'A resistor slows the fan. Close the boost switch to bypass it.',
+    'Capacitor flash': 'Open the switch: the capacitor keeps the LED lit for a moment as it drains.',
   };
   const exEl = document.getElementById('examples');
   for (const [name, build] of Object.entries(EXAMPLES)) {
@@ -510,6 +603,308 @@
     exEl.appendChild(b);
   }
   EXAMPLES['Simple bulb circuit']();
+
+  // ---------- Circuits as plain data ----------
+  // spec: [{ type, a: [x, y], b: [x, y], value?, closed?, color? }]
+  function toSpec(list) {
+    return list.map(p => ({ type: p.type, a: [p.a.x, p.a.y], b: [p.b.x, p.b.y], value: p.value, closed: p.closed, color: p.color }));
+  }
+  function loadSpec(spec) {
+    parts = []; selected = null;
+    for (const s of spec) {
+      const extra = {};
+      for (const k of ['value', 'closed', 'color']) if (s[k] !== undefined && s[k] !== null) extra[k] = s[k];
+      addPart(s.type, P(s.a[0], s.a[1]), P(s.b[0], s.b[1]), extra);
+    }
+    renderProps();
+  }
+  function capture(build) {
+    const saved = parts; parts = []; build(); const spec = toSpec(parts); parts = saved; return spec;
+  }
+
+  // ---------- Offline builder: turns a description into a circuit ----------
+  const NUM_WORDS = { a: 1, an: 1, one: 1, single: 1, two: 2, pair: 2, three: 3, four: 4, five: 5, six: 6 };
+  const COLOR_WORDS = { red: '#ff3b30', green: '#34c759', blue: '#0a84ff', yellow: '#ffcc00' };
+  const E12 = [10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82];
+  function standardResistor(r) {
+    for (let dec = 1; dec <= 1e5; dec *= 10) for (const v of E12) if (v * dec / 10 >= r) return v * dec / 10;
+    return 1e6;
+  }
+  function countOf(text, noun) {
+    const m = text.match(new RegExp(`\\b(\\d+|a|an|one|single|two|pair of|three|four|five|six)\\s+(?:[\\w/-]+\\s+){0,2}?(?:${noun})`));
+    if (m) { const w = m[1].replace(' of', ''); return Math.max(1, Math.min(6, +w || NUM_WORDS[w] || 1)); }
+    return new RegExp(`\\b(?:${noun})`).test(text) ? 1 : 0;
+  }
+  function designLocal(raw) {
+    const text = ' ' + raw.toLowerCase().replace(/[,.;!?()]/g, ' ') + ' ';
+    const notes = [];
+    let V = 9;
+    const vm = text.match(/(\d+(?:\.\d+)?)\s*v(?:olts?)?\b/);
+    if (vm) V = Math.max(1.5, Math.min(24, +vm[1]));
+    const colors = Object.keys(COLOR_WORDS).filter(c => text.includes(' ' + c));
+    let leds = countOf(text, 'leds?|light[- ]emitting diodes?');
+    if (leds && colors.length > leds) leds = Math.min(6, colors.length);
+    const bulbs = countOf(text, leds ? 'bulbs?|lamps?' : 'bulbs?|lamps?|lights?');
+    const motors = countOf(text, 'motors?|fans?');
+    const timer = /\b(capacitors?|timer|delay|rc|charg\w*|flash\w*|fade\w*)\b/.test(text) ? 1 : 0;
+    const rm = text.match(/(\d+(?:\.\d+)?)\s*(k)?\s*(?:ohms?|Ω)/);
+    const fixedR = rm ? +rm[1] * (rm[2] ? 1000 : 1) : null;
+    const wantsSwitch = /\b(switch\w*|button|toggle|on\/off|on off)\b/.test(text) || timer;
+    const series = /\b(series|chain\w*|in a row|one after another)\b/.test(text) && !/\bparallel\b/.test(text);
+    if (!leds && !bulbs && !motors && !timer && !fixedR) {
+      return { error: 'I couldn\'t spot any parts in that. Try mentioning LEDs, bulbs, a motor or fan, a capacitor or timer, a resistor, a switch, and a battery voltage.' };
+    }
+
+    // Each load is a list of segments wired one after another.
+    const loads = [];
+    const ledColor = i => COLOR_WORDS[colors[i % Math.max(1, colors.length)]] || LED_COLORS[i % LED_COLORS.length];
+    if (leds) {
+      if (series) {
+        if (V < leds * 2 + 1) { V = leds * 2 + 3; notes.push(`${leds} LEDs in series need more than ${leds * 2} V, so the battery was raised to ${V} V.`); }
+        const R = fixedR ?? standardResistor((V - 2 * leds) / 0.015);
+        loads.push([{ type: 'resistor', value: R }, ...Array.from({ length: leds }, (_, i) => ({ type: 'led', color: ledColor(i) }))]);
+        notes.push(`The LEDs share one ${R} Ω resistor: (${V} V − ${leds} × 2 V) ÷ 15 mA, rounded up to a standard value.`);
+      } else {
+        if (V < 3) { V = 3; notes.push('An LED needs about 2 V plus some headroom, so the battery was raised to 3 V.'); }
+        const R = fixedR ?? standardResistor((V - 2) / 0.015);
+        for (let i = 0; i < leds; i++) loads.push([{ type: 'resistor', value: R }, { type: 'led', color: ledColor(i) }]);
+        notes.push(`Each LED gets its own ${R} Ω resistor: (${V} V − 2 V) ÷ 15 mA ≈ ${Math.round((V - 2) / 0.015)} Ω, rounded up to a standard value so the LED can't burn out.`);
+      }
+    }
+    for (let i = 0; i < bulbs; i++) loads.push([{ type: 'bulb' }]);
+    if (bulbs > 1) notes.push(series ? 'The bulbs are in series: they share the voltage, so each one is dimmer.' : 'The bulbs are in parallel: each gets the full battery voltage, so they are bright, but the battery works harder.');
+    for (let i = 0; i < motors; i++) loads.push([{ type: 'motor' }]);
+    if (timer) {
+      loads.push([{ type: 'resistor', value: 1000 }, { type: 'capacitor', value: 2000 }]);
+      notes.push('The 1 kΩ resistor and 2000 µF capacitor form an RC timer: the capacitor charges to about 63% in R × C = 2 seconds. Close the switch to start it.');
+    }
+    if (fixedR && !leds) loads.push([{ type: 'resistor', value: fixedR }]);
+
+    const spec = [];
+    const add = (s, a, b) => { const o = { type: s.type, a, b }; for (const k of ['value', 'closed', 'color']) if (s[k] !== undefined) o[k] = s[k]; spec.push(o); };
+    const top = 2, bot = 12, bx = 2;
+    add({ type: 'battery', value: V }, [bx, bot], [bx, top]);
+    let x = bx;
+    if (wantsSwitch) { add({ type: 'switch', closed: !timer }, [x, top], [x + 3, top]); x += 3; }
+    const segs = loads.flat();
+    if (series || loads.length === 1) {
+      // One loop: parts along the top rail, then down the right side and back along the bottom.
+      const room = Math.floor((22 - x) / 3);
+      if (segs.length > room) return { error: `That's ${segs.length} parts in one line, which won't fit on the board. Try fewer, or wire them in parallel.` };
+      for (const s of segs) { add(s, [x, top], [x + 3, top]); x += 3; }
+      add({ type: 'wire' }, [x, top], [x, bot]); add({ type: 'wire' }, [x, bot], [bx, bot]);
+    } else {
+      // Parallel branches hanging between a top rail and a bottom rail.
+      const first = x + 3, maxBranches = Math.floor((22 - first) / 4) + 1;
+      if (loads.length > maxBranches) return { error: `${loads.length} parallel branches won't fit on the board; ${maxBranches} is the most. Try fewer parts.` };
+      let prevTop = x, prevBot = bx;
+      loads.forEach((load, i) => {
+        const cx = first + i * 4;
+        add({ type: 'wire' }, [prevTop, top], [cx, top]); add({ type: 'wire' }, [prevBot, bot], [cx, bot]);
+        prevTop = prevBot = cx;
+        let y = top;
+        for (const s of load) { add(s, [cx, y], [cx, y + 3]); y += 3; }
+        if (y < bot) add({ type: 'wire' }, [cx, y], [cx, bot]);
+      });
+    }
+    const n = (k, word) => k === 1 ? `a ${word}` : `${k} ${word}s`;
+    const what = [leds && (leds === 1 ? 'an LED' : `${leds} LEDs`), bulbs && n(bulbs, 'bulb'), motors && n(motors, 'motor'), timer && 'an RC timer'].filter(Boolean);
+    const title = (what.length ? what.join(', ') : 'Resistor circuit') + ` on ${V} V`;
+    notes.unshift(`Built ${what.length ? what.join(', ') : 'a resistor'} ${series ? 'in series' : loads.length > 1 ? 'in parallel' : ''} with a ${V} V battery${wantsSwitch ? ' and a switch' : ''}.`.replace('  ', ' '));
+    return { title: title[0].toUpperCase() + title.slice(1), explanation: notes, spec };
+  }
+
+  // ---------- AI builder (when the page runs where Claude can be asked) ----------
+  let sampler = null;
+  const badge = document.getElementById('builderBadge');
+  try {
+    if (window.claude && typeof window.claude.use === 'function') {
+      window.claude.use('sample').then(s => { if (s) { sampler = s; badge.textContent = '✦ AI builder'; } }).catch(() => {});
+    }
+  } catch (e) { /* not running inside claude.ai: offline builder only */ }
+
+  function aiPrompt(desc) {
+    return `You design simple DC circuits for a school circuit simulator. Reply with JSON only.
+Board: grid points with integer x 0-22 and y 0-14. Parts connect where their end points share a grid point.
+Draw parts as straight horizontal or vertical segments 2-6 grid units long. Avoid overlapping parts on the same line.
+Part types and fields:
+- battery: value = volts (1.5-24). End "b" is the + terminal.
+- wire
+- resistor: value = ohms
+- bulb: value = filament ohms (use 30)
+- led: value = forward volts (use 2), color one of "#ff3b30" red, "#34c759" green, "#0a84ff" blue, "#ffcc00" yellow. Current flows from end "a" (anode) to end "b". Always protect LEDs with a series resistor sized for about 15 mA.
+- switch: closed = true or false
+- capacitor: value = microfarads
+- motor: value = coil ohms (use 15)
+Every circuit needs one battery and closed loops. Lay it out neatly: battery on the left, a top rail and bottom rail, loads between them.
+Return: {"title": short name, "explanation": [2-4 short sentences a student can follow, including any calculation], "parts": [{"type":..., "a":[x,y], "b":[x,y], "value"?:..., "closed"?:..., "color"?:...}]}
+The circuit to build: ${desc}`;
+  }
+  function validateSpec(raw) {
+    if (!raw || !Array.isArray(raw.parts) || !raw.parts.length || raw.parts.length > 80) throw new Error('no parts');
+    const okPt = p => Array.isArray(p) && p.length === 2 && p.every(Number.isInteger) && p[0] >= 0 && p[0] < COLS && p[1] >= 0 && p[1] < ROWS;
+    const spec = raw.parts.map(p => {
+      if (!TYPES[p.type] || !okPt(p.a) || !okPt(p.b) || (p.a[0] === p.b[0] && p.a[1] === p.b[1])) throw new Error('bad part');
+      const o = { type: p.type, a: p.a, b: p.b };
+      if (TYPES[p.type].value !== undefined && Number.isFinite(+p.value) && +p.value > 0) o.value = Math.min(+p.value, 1e7);
+      if (p.type === 'switch') o.closed = p.closed !== false;
+      if (p.type === 'led') o.color = LED_COLORS.includes(p.color) ? p.color : LED_COLORS[0];
+      return o;
+    });
+    if (!spec.some(p => p.type === 'battery')) throw new Error('no battery');
+    const expl = Array.isArray(raw.explanation) ? raw.explanation.map(String) : [String(raw.explanation || '')];
+    return { title: String(raw.title || 'Your circuit').slice(0, 80), explanation: expl.filter(Boolean).slice(0, 6), spec };
+  }
+  function looseEnds(spec) {
+    const n = new Map();
+    for (const p of spec) for (const e of [p.a, p.b]) n.set(e.join(), (n.get(e.join()) || 0) + 1);
+    return [...n.values()].filter(c => c < 2).length;
+  }
+
+  async function buildFromText(desc) {
+    let result = null, via = 'offline';
+    if (sampler) {
+      try { result = validateSpec(await sampler.json(aiPrompt(desc))); via = 'ai'; }
+      catch (e) { result = null; }
+    }
+    if (!result) {
+      result = designLocal(desc);
+      if (result.error) return result;
+      if (sampler) result.explanation.push('The AI builder was unavailable, so the offline builder made this one.');
+    }
+    const loose = looseEnds(result.spec);
+    if (loose) result.explanation.push(`${loose} part end${loose > 1 ? 's are' : ' is'} not connected to anything (shown as red dots). Connect or delete ${loose > 1 ? 'them' : 'it'} in the studio.`);
+    return { ...result, via };
+  }
+
+  // ---------- Saved projects (this browser only) ----------
+  const STORE = 'circuitlab.projects.v1';
+  function readProjects() { try { return JSON.parse(localStorage.getItem(STORE)) || []; } catch (e) { return []; } }
+  function writeProjects(list) { try { localStorage.setItem(STORE, JSON.stringify(list.slice(0, 30))); } catch (e) { /* storage blocked */ } }
+  function saveProject(name, spec, about) {
+    const list = readProjects().filter(p => p.name !== name);
+    list.unshift({ name, spec, about, savedAt: Date.now() });
+    writeProjects(list); renderRecent();
+  }
+  function renderRecent() {
+    const el = document.getElementById('recent'); el.innerHTML = '';
+    const list = readProjects();
+    if (!list.length) { el.innerHTML = '<p class="muted small" style="margin:0">Nothing yet. Circuits you build or save will appear here.</p>'; return; }
+    for (const p of list) {
+      const row = document.createElement('div'); row.className = 'item';
+      const name = document.createElement('span'); name.className = 'name'; name.textContent = p.name;
+      const when = document.createElement('span'); when.className = 'muted small'; when.textContent = new Date(p.savedAt).toLocaleDateString();
+      const open = document.createElement('button'); open.textContent = 'Open';
+      open.addEventListener('click', () => { loadSpec(p.spec); showAbout(p.name, p.about); setMode('studio'); });
+      const del = document.createElement('button'); del.textContent = 'Delete';
+      del.addEventListener('click', () => { writeProjects(readProjects().filter(q => q.savedAt !== p.savedAt)); renderRecent(); });
+      row.append(name, when, open, del); el.appendChild(row);
+    }
+  }
+  let currentTitle = null;
+  function showAbout(title, lines) {
+    currentTitle = title;
+    document.getElementById('projName').value = title || '';
+    const el = document.getElementById('about');
+    if (!title) { el.hidden = true; return; }
+    el.hidden = false; el.innerHTML = '';
+    const b = document.createElement('b'); b.textContent = title; el.appendChild(b);
+    for (const l of lines || []) { const p = document.createElement('p'); p.className = 'small'; p.textContent = l; el.appendChild(p); }
+  }
+  document.getElementById('saveBtn').addEventListener('click', () => {
+    if (!parts.length) return;
+    const input = document.getElementById('projName');
+    const name = (input.value.trim() || currentTitle || 'My circuit').slice(0, 80);
+    const keep = readProjects().find(p => p.name === name);
+    saveProject(name, toSpec(parts), keep ? keep.about : null);
+    const btn = document.getElementById('saveBtn'); btn.textContent = 'Saved ✓'; setTimeout(() => { btn.textContent = 'Save project'; }, 1500);
+  });
+
+  // ---------- Template thumbnails ----------
+  function drawThumb(c, spec) {
+    const g = c.getContext('2d'), dk = isDark();
+    const xs = spec.flatMap(p => [p.a[0], p.b[0]]), ys = spec.flatMap(p => [p.a[1], p.b[1]]);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    const s = Math.min((c.width - 60) / Math.max(1, maxX - minX), (c.height - 60) / Math.max(1, maxY - minY));
+    const ox = (c.width - (maxX - minX) * s) / 2, oy = (c.height - (maxY - minY) * s) / 2;
+    const X = v => ox + (v - minX) * s, Y = v => oy + (v - minY) * s;
+    g.fillStyle = dk ? '#161a21' : '#fbfcfd'; g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = dk ? '#2c323d' : '#dfe3ea';
+    for (let gx = 0; gx < c.width; gx += 16) for (let gy = 0; gy < c.height; gy += 16) g.fillRect(gx, gy, 1.5, 1.5);
+    const ink = dk ? '#d5dbe5' : '#2a3242';
+    g.lineCap = 'round'; g.lineWidth = 3;
+    for (const p of spec) {
+      const x1 = X(p.a[0]), y1 = Y(p.a[1]), x2 = X(p.b[0]), y2 = Y(p.b[1]), mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+      g.strokeStyle = ink; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+      const mark = { battery: '#e74c3c', resistor: '#c8962a', bulb: '#ffcc33', led: p.color || '#ff3b30', switch: ink, capacitor: '#2f6fde', motor: '#8e9aab' }[p.type];
+      if (!mark) continue;
+      g.fillStyle = mark; g.strokeStyle = ink; g.lineWidth = 2;
+      g.beginPath();
+      if (p.type === 'bulb' || p.type === 'motor') g.arc(mx, my, 10, 0, Math.PI * 2);
+      else if (p.type === 'led') { g.moveTo(mx - 8, my - 8); g.lineTo(mx + 8, my - 8); g.lineTo(mx, my + 8); g.closePath(); }
+      else g.rect(mx - 9, my - 6, 18, 12);
+      g.fill(); g.stroke(); g.lineWidth = 3;
+    }
+  }
+  const tplEl = document.getElementById('templates');
+  for (const [name, build] of Object.entries(EXAMPLES)) {
+    const spec = capture(build);
+    const card = document.createElement('button'); card.className = 'tcard';
+    const c = document.createElement('canvas'); c.width = 400; c.height = 250; drawThumb(c, spec);
+    const meta = document.createElement('div'); meta.className = 'meta';
+    const b = document.createElement('b'); b.textContent = name;
+    const d = document.createElement('span'); d.textContent = TEMPLATE_INFO[name] || '';
+    meta.append(b, d); card.append(c, meta);
+    card.addEventListener('click', () => { loadSpec(spec); showAbout(name, [TEMPLATE_INFO[name]]); setMode('studio'); });
+    tplEl.appendChild(card);
+  }
+
+  // ---------- Builder view wiring ----------
+  const IDEAS = [
+    'Three LEDs, red, green and blue, each with its own resistor on a 9 V battery',
+    'Two bulbs in series with a switch',
+    'A fan motor on a 6 V battery with an on/off switch',
+    'A capacitor timer that charges when I press a switch',
+  ];
+  const chipsEl = document.getElementById('chips');
+  for (const idea of IDEAS) {
+    const b = document.createElement('button'); b.textContent = idea;
+    b.addEventListener('click', () => { promptEl.value = idea; promptEl.focus(); });
+    chipsEl.appendChild(b);
+  }
+  const promptEl = document.getElementById('prompt'), buildBtn = document.getElementById('buildBtn'), msgEl = document.getElementById('buildMsg');
+  async function runBuild() {
+    const desc = promptEl.value.trim();
+    msgEl.hidden = true;
+    if (!desc) { promptEl.focus(); return; }
+    buildBtn.textContent = sampler ? 'Designing…' : 'Building…'; document.querySelector('.ask').classList.add('busy');
+    try {
+      const r = await buildFromText(desc);
+      if (r.error) { msgEl.textContent = r.error; msgEl.hidden = false; return; }
+      loadSpec(r.spec); showAbout(r.title, r.explanation);
+      saveProject(r.title, r.spec, r.explanation);
+      setMode('studio');
+    } finally {
+      buildBtn.textContent = 'Build circuit ↑'; document.querySelector('.ask').classList.remove('busy');
+    }
+  }
+  buildBtn.addEventListener('click', runBuild);
+  promptEl.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runBuild(); } });
+  document.getElementById('openStudio').addEventListener('click', () => { showAbout(null); setMode('studio'); });
+
+  function setMode(mode) {
+    const agent = mode === 'agent';
+    document.getElementById('agentView').hidden = !agent;
+    document.getElementById('studioView').hidden = agent;
+    document.getElementById('modeAgent').classList.toggle('active', agent);
+    document.getElementById('modeStudio').classList.toggle('active', !agent);
+    document.getElementById('modeHint').textContent = agent ? 'Describe a circuit, or start from a template.' : 'Pick a part, then drag between two dots on the board to place it.';
+    try { history.replaceState(null, '', agent ? location.pathname : '#studio'); } catch (e) { /* sandboxed frame */ }
+  }
+  document.getElementById('modeAgent').addEventListener('click', () => setMode('agent'));
+  document.getElementById('modeStudio').addEventListener('click', () => setMode('studio'));
+  renderRecent();
+  setMode(location.hash === '#studio' ? 'studio' : 'agent');
 
   // ---------- Loop ----------
   let last = performance.now();
