@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Virtual Chemistry Lab</title>
+<link rel="stylesheet" href="../common.css">
+<style>
+  .shelf { display: grid; grid-template-columns: 1fr; gap: 6px; }
+  .reagent { display: flex; align-items: center; gap: 10px; text-align: left; width: 100%; }
+  .reagent .swatch { width: 14px; height: 22px; border-radius: 3px 3px 6px 6px; border: 1px solid var(--line); flex: none; }
+  .reagent .name { flex: 1; }
+  .reagent .conc { color: var(--muted); font-size: 12px; }
+  .bench { display: flex; flex-direction: column; gap: 12px; }
+  #beaker { aspect-ratio: 4 / 3; }
+  #chart { aspect-ratio: 5 / 2; }
+  .exp { border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+  .exp + .exp { margin-top: 8px; }
+  .exp p { margin: 4px 0 8px; font-size: 13px; color: var(--muted); }
+  .warn { color: var(--warn); font-weight: 600; }
+  #tooltip { position: fixed; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12px; display: none; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="home" href="../index.html">← Science Studio</a>
+  <h1>Virtual Chemistry Lab</h1>
+  <span class="sub">Click a reagent to pour it into the beaker. Watch the colour, bubbles, temperature and pH.</span>
+</header>
+
+<div class="layout">
+  <aside class="panel">
+    <h2>Reagent shelf</h2>
+    <div class="row small" style="margin-bottom:10px">
+      <label for="amount">Pour</label>
+      <select id="amount">
+        <option value="1">1 mL</option>
+        <option value="5">5 mL</option>
+        <option value="10" selected>10 mL</option>
+        <option value="25">25 mL</option>
+        <option value="50">50 mL</option>
+      </select>
+    </div>
+    <div class="shelf" id="liquids"></div>
+    <h3>Indicators <span class="muted small">(3 drops)</span></h3>
+    <div class="shelf" id="indicators"></div>
+    <h3>Solids <span class="muted small">(one piece)</span></h3>
+    <div class="shelf" id="solids"></div>
+  </aside>
+
+  <section class="bench">
+    <canvas id="beaker" width="800" height="600" aria-label="Beaker"></canvas>
+    <div class="row">
+      <button id="reset">Empty &amp; wash beaker</button>
+      <button id="stir">Stir</button>
+      <label class="small row" style="gap:6px"><input type="checkbox" id="showIons"> Show ion view</label>
+    </div>
+    <div class="panel">
+      <h2>pH vs volume added</h2>
+      <canvas id="chart" width="800" height="320" aria-label="pH chart"></canvas>
+      <p class="muted small" style="margin:6px 0 0">Each pour adds a point. Slowly add NaOH to HCl (1 mL at a time near pH 7) to see the steep jump at the equivalence point.</p>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <h2>Instruments</h2>
+    <div class="readout">
+      <span>pH</span><b id="ph">—</b>
+      <span>Temperature</span><b id="temp">25.0 °C</b>
+      <span>Volume</span><b id="vol">0 mL</b>
+      <span>Gas released</span><b id="gas">0 mL</b>
+    </div>
+    <p id="overflow" class="warn small" hidden>Beaker is full! Empty it to continue.</p>
+    <h3>Contents</h3>
+    <div id="contents" class="readout small"></div>
+    <h3>Observations</h3>
+    <ol id="log" class="log"><li class="muted">Nothing yet. Pour something in!</li></ol>
+    <h3>Guided experiments</h3>
+    <div id="experiments"></div>
+  </aside>
+</div>
+<div id="tooltip"></div>
+
+<script>
+(() => {
+  // ---------- Chemistry data ----------
+  // Species are tracked in moles. Aqueous ions plus solids.
+  const ION_INFO = {
+    H:   { label: 'H⁺',    color: '#e74c3c' },
+    OH:  { label: 'OH⁻',   color: '#3498db' },
+    Na:  { label: 'Na⁺',   color: '#f1c40f' },
+    Cl:  { label: 'Cl⁻',   color: '#2ecc71' },
+    SO4: { label: 'SO₄²⁻', color: '#9b59b6' },
+    Cu:  { label: 'Cu²⁺',  color: '#1f78d1' },
+    Ag:  { label: 'Ag⁺',   color: '#bdc3c7' },
+    NO3: { label: 'NO₃⁻',  color: '#e67e22' },
+    Zn:  { label: 'Zn²⁺',  color: '#95a5a6' },
+    Mg:  { label: 'Mg²⁺',  color: '#d35400' },
+    Ca:  { label: 'Ca²⁺',  color: '#16a085' },
+  };
+  const SOLID_INFO = {
+    zinc:    { label: 'Zinc (Zn)',            color: '#8e979e' },
+    mag:     { label: 'Magnesium (Mg)',       color: '#d9dde0' },
+    marble:  { label: 'Marble (CaCO₃)',       color: '#f2efe6' },
+    copper:  { label: 'Copper metal (Cu)',    color: '#b5562a' },
+    agcl:    { label: 'Silver chloride (AgCl)', color: '#ffffff' },
+    cuoh:    { label: 'Copper(II) hydroxide',  color: '#7fb8e6' },
+    baso4:   { label: 'Barium sulfate (BaSO₄)', color: '#f7f7f7' },
+  };
+
+  const LIQUIDS = [
+    { id: 'hcl',   name: 'Hydrochloric acid', formula: 'HCl',   conc: '1.0 M', color: 'rgba(230,240,255,.6)', ions: { H: 1, Cl: 1 } },
+    { id: 'h2so4', name: 'Sulfuric acid',     formula: 'H₂SO₄', conc: '0.5 M', color: 'rgba(230,240,255,.6)', ions: { H: 1, SO4: 0.5 } },
+    { id: 'naoh',  name: 'Sodium hydroxide',  formula: 'NaOH',  conc: '1.0 M', color: 'rgba(230,240,255,.6)', ions: { Na: 1, OH: 1 } },
+    { id: 'cuso4', name: 'Copper(II) sulfate', formula: 'CuSO₄', conc: '0.5 M', color: '#3f8fe0', ions: { Cu: 0.5, SO4: 0.5 } },
+    { id: 'agno3', name: 'Silver nitrate',    formula: 'AgNO₃', conc: '0.1 M', color: 'rgba(230,240,255,.6)', ions: { Ag: 0.1, NO3: 0.1 } },
+    { id: 'nacl',  name: 'Sodium chloride',   formula: 'NaCl',  conc: '1.0 M', color: 'rgba(230,240,255,.6)', ions: { Na: 1, Cl: 1 } },
+    { id: 'bacl2', name: 'Barium chloride',   formula: 'BaCl₂', conc: '0.2 M', color: 'rgba(230,240,255,.6)', ions: { Ba: 0.2, Cl: 0.4 } },
+    { id: 'water', name: 'Distilled water',   formula: 'H₂O',   conc: '',      color: 'rgba(230,240,255,.6)', ions: {} },
+  ];
+  ION_INFO.Ba = { label: 'Ba²⁺', color: '#27ae60' };
+
+  const INDICATORS = [
+    { id: 'phenol',    name: 'Phenolphthalein',     color: 'rgba(255,255,255,.8)' },
+    { id: 'universal', name: 'Universal indicator', color: '#3aa64a' },
+    { id: 'litmus',    name: 'Litmus',              color: '#7d4fa0' },
+  ];
+  const SOLIDS = [
+    { id: 'zinc',   name: 'Zinc granule',     formula: 'Zn',    color: SOLID_INFO.zinc.color },
+    { id: 'mag',    name: 'Magnesium ribbon', formula: 'Mg',    color: SOLID_INFO.mag.color },
+    { id: 'marble', name: 'Marble chip',      formula: 'CaCO₃', color: SOLID_INFO.marble.color },
+  ];
+  const PIECE_MOL = 0.01;
+  const CAPACITY_ML = 250;
+  const MOLAR_GAS_ML = 24000; // mL per mole at room temperature
+
+  // ---------- State ----------
+  let S;
+  function freshState() {
+    return {
+      volL: 0, tempC: 25, ions: {}, solids: {}, indicators: new Set(),
+      gasMl: 0, gasRate: 0, addedMl: 0, curve: [], seen: new Set(), stirT: 0,
+    };
+  }
+  S = freshState();
+
+  const $ = id => document.getElementById(id);
+  const amountSel = $('amount');
+
+  // ---------- Shelf UI ----------
+  function shelfButton(parent, item, sub, onClick) {
+    const b = document.createElement('button');
+    b.className = 'reagent';
+    b.innerHTML = `<span class="swatch" style="background:${item.color}"></span>
+      <span class="name">${item.name}${item.formula ? ` <span class="muted">${item.formula}</span>` : ''}</span>
+      <span class="conc">${sub || ''}</span>`;
+    b.addEventListener('click', onClick);
+    parent.appendChild(b);
+  }
+  LIQUIDS.forEach(l => shelfButton($('liquids'), l, l.conc, () => pour(l, +amountSel.value)));
+  INDICATORS.forEach(i => shelfButton($('indicators'), i, '', () => addIndicator(i)));
+  SOLIDS.forEach(s => shelfButton($('solids'), s, '', () => addSolid(s)));
+
+  // ---------- Actions ----------
+  function full(ml) { return (S.volL * 1000 + ml) > CAPACITY_ML + 1e-9; }
+  function pour(liquid, ml) {
+    if (full(ml)) { $('overflow').hidden = false; return; }
+    const L = ml / 1000;
+    // Mixing temperature: reagent arrives at 25 °C.
+    S.tempC = (S.tempC * S.volL + 25 * L) / (S.volL + L);
+    S.volL += L;
+    for (const [ion, c] of Object.entries(liquid.ions)) S.ions[ion] = (S.ions[ion] || 0) + c * L;
+    S.addedMl += ml;
+    spawnPourStream(liquid.color);
+    note('pour-' + liquid.id, `Added ${liquid.name}.`, true);
+    react(0); // instant reactions
+    S.curve.push({ x: S.addedMl, y: pH(), label: `${ml} mL ${liquid.formula}` });
+  }
+  function addIndicator(ind) {
+    if (S.volL <= 0) { note('noliquid', 'Add some liquid first so the indicator has something to dissolve in.'); return; }
+    S.indicators.add(ind.id);
+    note('ind-' + ind.id, `Added ${ind.name}. ${indicatorHint(ind.id)}`, true);
+  }
+  function indicatorHint(id) {
+    return {
+      phenol: 'Colourless in acid and neutral solutions, pink above about pH 8.2.',
+      universal: 'Red (strong acid) → orange → yellow → green (neutral) → blue → purple (strong alkali).',
+      litmus: 'Red in acid, blue in alkali.',
+    }[id];
+  }
+  function addSolid(s) {
+    if (S.volL <= 0) { note('drysolid', `The ${s.name.toLowerCase()} sits in the dry beaker. Add a liquid to see if it reacts.`); }
+    S.solids[s.id] = (S.solids[s.id] || 0) + PIECE_MOL;
+    solidPieces.push(makePiece(s.id));
+  }
+
+  // ---------- Observations ----------
+  function note(key, text, repeat) {
+    if (!repeat && S.seen.has(key)) return;
+    S.seen.add(key);
+    const log = $('log');
+    if (log.firstElementChild && log.firstElementChild.classList.contains('muted')) log.innerHTML = '';
+    const li = document.createElement('li');
+    li.innerHTML = text;
+    log.appendChild(li);
+    while (log.children.length > 40) log.removeChild(log.firstElementChild);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // ---------- Reaction engine ----------
+  const get = k => S.ions[k] || 0;
+  const conc = k => S.volL > 0 ? get(k) / S.volL : 0;
+  function take(k, n) { S.ions[k] = Math.max(0, get(k) - n); }
+  function give(k, n) { S.ions[k] = get(k) + n; }
+  function heat(joules) {
+    if (S.volL <= 0) return;
+    S.tempC += joules / (S.volL * 1000 * 4.18); // water: 4.18 J/(g·K)
+  }
+
+  function react(dt) {
+    if (S.volL <= 0) { S.gasRate = 0; return; }
+    // 1. Neutralisation (instant): H⁺ + OH⁻ → H₂O, ΔH = −57 kJ/mol
+    let n = Math.min(get('H'), get('OH'));
+    if (n > 1e-9) {
+      take('H', n); take('OH', n); heat(57100 * n);
+      note('neut', 'Neutralisation: <b>H⁺ + OH⁻ → H₂O</b>. The mixture warms up (exothermic).');
+    }
+    // 2. Precipitation: Ag⁺ + Cl⁻ → AgCl(s)
+    n = Math.min(get('Ag'), get('Cl'));
+    if (n > 1e-9) {
+      take('Ag', n); take('Cl', n); S.solids.agcl = (S.solids.agcl || 0) + n; spawnPrecipitate('agcl', n);
+      note('agcl', 'A <b>white precipitate</b> forms: <b>Ag⁺ + Cl⁻ → AgCl(s)</b>. This is the test for chloride ions.');
+    }
+    // 3. Cu²⁺ + 2OH⁻ → Cu(OH)₂(s)
+    n = Math.min(get('Cu'), get('OH') / 2);
+    if (n > 1e-9) {
+      take('Cu', n); take('OH', 2 * n); S.solids.cuoh = (S.solids.cuoh || 0) + n; spawnPrecipitate('cuoh', n);
+      note('cuoh', 'A <b>pale blue precipitate</b> forms: <b>Cu²⁺ + 2OH⁻ → Cu(OH)₂(s)</b>.');
+    }
+    // 4. Ba²⁺ + SO₄²⁻ → BaSO₄(s)
+    n = Math.min(get('Ba'), get('SO4'));
+    if (n > 1e-9) {
+      take('Ba', n); take('SO4', n); S.solids.baso4 = (S.solids.baso4 || 0) + n; spawnPrecipitate('baso4', n);
+      note('baso4', 'A <b>thick white precipitate</b> forms: <b>Ba²⁺ + SO₄²⁻ → BaSO₄(s)</b>. This is the test for sulfate ions.');
+    }
+
+    let gasMol = 0;
+    if (dt > 0) {
+      const stir = S.stirT > 0 ? 2.5 : 1;
+      // Rates in mol/s, proportional to concentration and remaining surface area.
+      const surf = id => Math.cbrt((S.solids[id] || 0) / PIECE_MOL) * PIECE_MOL;
+      // 5. Metal + acid → salt + hydrogen
+      const metals = [
+        { id: 'mag', ion: 'Mg', k: 0.9, dH: 467000, name: 'Magnesium', eq: 'Mg + 2H⁺ → Mg²⁺ + H₂↑' },
+        { id: 'zinc', ion: 'Zn', k: 0.12, dH: 153000, name: 'Zinc', eq: 'Zn + 2H⁺ → Zn²⁺ + H₂↑' },
+      ];
+      for (const m of metals) {
+        if (!(S.solids[m.id] > 1e-9) || conc('H') < 1e-4) continue;
+        let r = m.k * conc('H') * surf(m.id) * stir * dt;
+        r = Math.min(r, S.solids[m.id], get('H') / 2);
+        S.solids[m.id] -= r; take('H', 2 * r); give(m.ion, r); heat(m.dH * r); gasMol += r;
+        note('h2-' + m.id, `${m.name} fizzes: <b>${m.eq}</b>. Hydrogen gas would give a squeaky pop with a lit splint.`);
+      }
+      // 6. Displacement: more reactive metal pushes copper out of solution
+      for (const m of [{ id: 'mag', ion: 'Mg', k: 0.4, name: 'Magnesium' }, { id: 'zinc', ion: 'Zn', k: 0.15, name: 'Zinc' }]) {
+        if (!(S.solids[m.id] > 1e-9) || conc('Cu') < 1e-4) continue;
+        let r = m.k * conc('Cu') * surf(m.id) * stir * dt;
+        r = Math.min(r, S.solids[m.id], get('Cu'));
+        S.solids[m.id] -= r; take('Cu', r); give(m.ion, r); S.solids.copper = (S.solids.copper || 0) + r; heat(150000 * r);
+        note('disp-' + m.id, `Displacement: <b>${m.id === 'mag' ? 'Mg' : 'Zn'} + Cu²⁺ → ${m.ion}²⁺ + Cu</b>. Brown copper coats the metal and the blue colour fades. ${m.name} is more reactive than copper.`);
+      }
+      // 7. Carbonate + acid → CO₂
+      if (S.solids.marble > 1e-9 && conc('H') > 1e-4) {
+        let r = 0.25 * conc('H') * surf('marble') * stir * dt;
+        r = Math.min(r, S.solids.marble, get('H') / 2);
+        S.solids.marble -= r; take('H', 2 * r); give('Ca', r); gasMol += r;
+        note('co2', 'Marble fizzes: <b>CaCO₃ + 2H⁺ → Ca²⁺ + H₂O + CO₂↑</b>. Carbon dioxide would turn limewater milky.');
+      }
+      // Newton cooling back to room temperature
+      S.tempC += (25 - S.tempC) * (1 - Math.exp(-dt / 90));
+      S.stirT = Math.max(0, S.stirT - dt);
+      for (const k of Object.keys(S.solids)) if (S.solids[k] < 1e-7) delete S.solids[k];
+      S.gasRate = S.gasRate * 0.9 + 0.1 * (gasMol / dt);
+      S.gasMl += gasMol * MOLAR_GAS_ML;
+    }
+  }
+
+  function pH() {
+    if (S.volL <= 0) return null;
+    const x = (get('H') - get('OH')) / S.volL;
+    const h = (x + Math.sqrt(x * x + 4e-14)) / 2;
+    return Math.min(14, Math.max(0, -Math.log10(h)));
+  }
+
+  // ---------- Colour ----------
+  function hexToRgb(c) {
+    if (c.startsWith('rgba')) { const p = c.match(/[\d.]+/g).map(Number); return p.slice(0, 3); }
+    const v = parseInt(c.slice(1), 16); return [v >> 16 & 255, v >> 8 & 255, v & 255];
+  }
+  function lerp(a, b, t) { return a.map((v, i) => v + (b[i] - v) * t); }
+  function universalColor(p) {
+    const stops = [[0, '#d7191c'], [3, '#f46d43'], [5, '#fdd835'], [7, '#4caf50'], [9, '#1e88e5'], [11, '#3949ab'], [14, '#6a1b9a']];
+    for (let i = 1; i < stops.length; i++) if (p <= stops[i][0]) {
+      const t = (p - stops[i - 1][0]) / (stops[i][0] - stops[i - 1][0]);
+      return lerp(hexToRgb(stops[i - 1][1]), hexToRgb(stops[i][1]), t);
+    }
+    return hexToRgb('#6a1b9a');
+  }
+  function liquidColor() {
+    // Start with nearly clear water, then layer dissolved colours.
+    let rgb = [220, 235, 250], alpha = 0.35;
+    const cu = conc('Cu');
+    if (cu > 0) { const t = Math.min(1, cu / 0.3); rgb = lerp(rgb, [40, 120, 220], t); alpha += 0.45 * t; }
+    const p = pH();
+    if (p != null) {
+      if (S.indicators.has('universal')) { rgb = lerp(rgb, universalColor(p), 0.85); alpha = Math.max(alpha, 0.8); }
+      if (S.indicators.has('litmus')) {
+        const c = p < 5 ? [210, 50, 60] : p > 8 ? [60, 80, 200] : lerp([210, 50, 60], [60, 80, 200], (p - 5) / 3);
+        rgb = lerp(rgb, c, 0.75); alpha = Math.max(alpha, 0.75);
+      }
+      if (S.indicators.has('phenol') && p > 8.2) {
+        const t = Math.min(1, (p - 8.2) / 1.8); rgb = lerp(rgb, [230, 40, 160], 0.9 * t); alpha = Math.max(alpha, 0.35 + 0.5 * t);
+      }
+    }
+    // Suspended precipitate makes it cloudy.
+    const cloud = particles.filter(q => q.kind !== 'copper' && !q.settled).length;
+    if (cloud > 0) { rgb = lerp(rgb, [235, 238, 240], Math.min(0.5, cloud / 400)); alpha = Math.max(alpha, Math.min(0.9, 0.4 + cloud / 400)); }
+    return [rgb.map(Math.round), alpha];
+  }
+
+  // ---------- Rendering ----------
+  const cv = $('beaker'), ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  const B = { x: 230, y: 90, w: 340, h: 440 }; // beaker inner box
+  const particles = [];  // precipitate particles
+  const bubbles = [];
+  const solidPieces = [];
+  let pourStream = null;
+  let ionDots = [];
+
+  function makePiece(kind) {
+    return { kind, x: B.x + 40 + Math.random() * (B.w - 80), r: kind === 'mag' ? 0 : 14 + Math.random() * 6, ang: Math.random() * Math.PI };
+  }
+  function spawnPrecipitate(kind, mol) {
+    const count = Math.min(250, Math.ceil(mol * 40000));
+    for (let i = 0; i < count; i++) particles.push({
+      kind, x: B.x + 10 + Math.random() * (B.w - 20), y: liquidTop() + Math.random() * (B.y + B.h - liquidTop()) * 0.8,
+      vy: 4 + Math.random() * 10, r: 1.5 + Math.random() * 2, settled: false,
+    });
+    while (particles.length > 1500) particles.shift();
+  }
+  function spawnPourStream(color) { pourStream = { color, t: 0.6 }; }
+  function liquidTop() { return B.y + B.h - (S.volL * 1000 / CAPACITY_ML) * B.h; }
+
+  function isDark() { return matchMedia('(prefers-color-scheme: dark)').matches; }
+
+  function drawBeaker(dt) {
+    ctx.clearRect(0, 0, W, H);
+    const dark = isDark();
+    const glass = dark ? 'rgba(200,215,235,.55)' : 'rgba(90,110,140,.65)';
+    const ink = dark ? '#c9d1dc' : '#3b4558';
+
+    // Bench
+    ctx.fillStyle = dark ? '#232934' : '#e8ebef';
+    ctx.fillRect(0, B.y + B.h + 14, W, H);
+
+    // Liquid
+    const top = liquidTop();
+    if (S.volL > 0) {
+      const [rgb, a] = liquidColor();
+      const wobble = S.stirT > 0 ? Math.sin(performance.now() / 80) * 4 : 0;
+      ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
+      ctx.beginPath();
+      ctx.moveTo(B.x, top + wobble);
+      ctx.quadraticCurveTo(B.x + B.w / 2, top - wobble, B.x + B.w, top + wobble);
+      ctx.lineTo(B.x + B.w, B.y + B.h - 16);
+      ctx.quadraticCurveTo(B.x + B.w, B.y + B.h, B.x + B.w - 16, B.y + B.h);
+      ctx.lineTo(B.x + 16, B.y + B.h);
+      ctx.quadraticCurveTo(B.x, B.y + B.h, B.x, B.y + B.h - 16);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},1)`; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(B.x, top + wobble); ctx.quadraticCurveTo(B.x + B.w / 2, top - wobble, B.x + B.w, top + wobble); ctx.stroke();
+    }
+
+    // Solid pieces (metals / marble) sitting on the bottom
+    const floor = B.y + B.h - 4;
+    for (const kind of ['zinc', 'mag', 'marble']) {
+      const pieces = solidPieces.filter(p => p.kind === kind);
+      const total = S.solids[kind] || 0;
+      if (!pieces.length) continue;
+      if (total <= 0) { for (const p of pieces) solidPieces.splice(solidPieces.indexOf(p), 1); continue; }
+      const frac = Math.min(1, total / (pieces.length * PIECE_MOL));
+      const copperCoat = Math.min(1, (S.solids.copper || 0) / 0.004);
+      for (const p of pieces) {
+        let col = SOLID_INFO[kind].color;
+        if (kind !== 'marble' && copperCoat > 0) col = `rgb(${lerp(hexToRgb(col), hexToRgb('#a0522d'), copperCoat * 0.85).map(Math.round)})`;
+        ctx.fillStyle = col; ctx.strokeStyle = ink; ctx.lineWidth = 1.5;
+        if (kind === 'mag') {
+          ctx.save(); ctx.translate(p.x, floor - 6); ctx.rotate(p.ang * 0.2 - 0.1);
+          const len = 90 * frac;
+          ctx.fillRect(-len / 2, -4, len, 8); ctx.strokeRect(-len / 2, -4, len, 8); ctx.restore();
+        } else {
+          const r = p.r * Math.cbrt(frac);
+          ctx.beginPath();
+          for (let i = 0; i < 7; i++) {
+            const a = p.ang + i / 7 * Math.PI * 2, rr = r * (0.75 + 0.25 * Math.sin(i * 2.3 + p.ang));
+            const px = p.x + Math.cos(a) * rr, py = floor - r + Math.sin(a) * rr * 0.8;
+            i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+          }
+          ctx.closePath(); ctx.fill(); ctx.stroke();
+        }
+      }
+    }
+
+    // Copper metal deposit when the metal is all used up
+    if ((S.solids.copper || 0) > 0 && !solidPieces.some(p => p.kind === 'zinc' || p.kind === 'mag')) {
+      ctx.fillStyle = '#a0522d';
+      const h = Math.min(18, 4 + S.solids.copper * 1500);
+      ctx.fillRect(B.x + 30, floor - h, B.w - 60, h);
+    }
+
+    // Precipitate particles drifting down and settling
+    for (const q of particles) {
+      if (!q.settled) {
+        q.y += q.vy * dt * (S.stirT > 0 ? -0.5 : 1);
+        if (S.stirT > 0) q.x += Math.sin(performance.now() / 200 + q.y) * 1.5;
+        q.x = Math.max(B.x + 4, Math.min(B.x + B.w - 4, q.x));
+        if (q.y < top + 4) q.y = top + 4;
+        if (q.y >= floor - Math.random() * 10) { q.y = floor - Math.random() * 10; q.settled = true; }
+      } else if (S.stirT > 0) { q.settled = false; q.y -= 40 + Math.random() * 120; }
+      ctx.fillStyle = SOLID_INFO[q.kind].color;
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Bubbles from gas-producing reactions
+    if (S.volL > 0 && S.gasRate > 1e-6) {
+      const spawn = Math.min(12, S.gasRate * 6000 * dt * 60);
+      const sources = solidPieces.filter(p => p.kind !== 'copper');
+      for (let i = 0; i < spawn && sources.length; i++) {
+        const s = sources[Math.floor(Math.random() * sources.length)];
+        bubbles.push({ x: s.x + (Math.random() - .5) * 30, y: floor - 10, r: 2 + Math.random() * 4, vy: 60 + Math.random() * 80 });
+      }
+    }
+    ctx.strokeStyle = dark ? 'rgba(255,255,255,.8)' : 'rgba(255,255,255,.95)'; ctx.lineWidth = 1.5;
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const b = bubbles[i]; b.y -= b.vy * dt; b.x += Math.sin(b.y / 10) * 0.4;
+      if (b.y < top) { bubbles.splice(i, 1); continue; }
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    // Ion view: show dissolved ions as labelled dots (illustrative, not to scale)
+    if ($('showIons').checked && S.volL > 0) drawIons(top, floor, dt);
+
+    // Pour stream
+    if (pourStream) {
+      pourStream.t -= dt;
+      ctx.fillStyle = pourStream.color;
+      ctx.fillRect(B.x + B.w / 2 - 4, 0, 8, top);
+      if (pourStream.t <= 0) pourStream = null;
+    }
+
+    // Glass
+    ctx.strokeStyle = glass; ctx.lineWidth = 6; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(B.x - 18, B.y - 10); ctx.lineTo(B.x, B.y);
+    ctx.lineTo(B.x, B.y + B.h - 16); ctx.quadraticCurveTo(B.x, B.y + B.h, B.x + 16, B.y + B.h);
+    ctx.lineTo(B.x + B.w - 16, B.y + B.h); ctx.quadraticCurveTo(B.x + B.w, B.y + B.h, B.x + B.w, B.y + B.h - 16);
+    ctx.lineTo(B.x + B.w, B.y);
+    ctx.stroke();
+    // Graduations
+    ctx.fillStyle = ink; ctx.strokeStyle = ink; ctx.lineWidth = 1.5; ctx.font = '16px system-ui';
+    for (let ml = 50; ml <= CAPACITY_ML; ml += 50) {
+      const y = B.y + B.h - ml / CAPACITY_ML * B.h;
+      ctx.beginPath(); ctx.moveTo(B.x + B.w - 30, y); ctx.lineTo(B.x + B.w - 6, y); ctx.stroke();
+      ctx.fillText(ml + ' mL', B.x + B.w + 12, y + 5);
+    }
+
+    // Thermometer
+    const tx = 140, ty = 60, th = 420;
+    ctx.fillStyle = dark ? '#2b3240' : '#ffffff'; ctx.strokeStyle = ink; ctx.lineWidth = 2;
+    roundRect(tx - 9, ty, 18, th, 9); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(tx, ty + th + 14, 18, 0, Math.PI * 2); ctx.fillStyle = '#d63b3b'; ctx.fill(); ctx.stroke();
+    const tFrac = Math.max(0, Math.min(1, (S.tempC - 0) / 100));
+    ctx.fillStyle = '#d63b3b'; ctx.fillRect(tx - 4, ty + th - tFrac * th, 8, tFrac * th + 6);
+    ctx.fillStyle = ink; ctx.font = '14px system-ui'; ctx.textAlign = 'right';
+    for (let t = 0; t <= 100; t += 20) { const y = ty + th - t / 100 * th; ctx.fillText(t + '°', tx - 16, y + 5); }
+    ctx.textAlign = 'left';
+
+    // pH meter display
+    const p = pH();
+    ctx.fillStyle = dark ? '#0f1318' : '#22303f'; roundRect(640, 60, 130, 76, 10); ctx.fill();
+    ctx.fillStyle = '#7CFC9A'; ctx.font = 'bold 34px ui-monospace, monospace'; ctx.textAlign = 'center';
+    ctx.fillText(p == null ? '--.-' : p.toFixed(2), 705, 108);
+    ctx.font = '12px system-ui'; ctx.fillStyle = '#b9c6d3'; ctx.fillText('pH METER', 705, 128);
+    ctx.textAlign = 'left';
+    if (S.volL > 0) {
+      ctx.strokeStyle = ink; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(705, 136); ctx.lineTo(705, 160); ctx.quadraticCurveTo(705, 190, B.x + B.w - 60, 200); ctx.lineTo(B.x + B.w - 60, Math.max(top + 30, 220)); ctx.stroke();
+    }
+  }
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function drawIons(top, floor, dt) {
+    const want = [];
+    for (const [k, mol] of Object.entries(S.ions)) {
+      if (mol < 1e-6 || !ION_INFO[k]) continue;
+      const n = Math.min(30, Math.max(1, Math.round(Math.sqrt(mol / 0.0005))));
+      for (let i = 0; i < n; i++) want.push(k + '#' + i);
+    }
+    const keep = ionDots.filter(d => want.includes(d.id));
+    for (const id of want) if (!keep.some(d => d.id === id)) {
+      const k = id.split('#')[0];
+      keep.push({ id, k, x: B.x + 20 + Math.random() * (B.w - 40), y: top + 15 + Math.random() * Math.max(10, floor - top - 30), vx: (Math.random() - .5) * 40, vy: (Math.random() - .5) * 40 });
+    }
+    ionDots = keep;
+    ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'center';
+    for (const d of ionDots) {
+      d.x += d.vx * dt; d.y += d.vy * dt;
+      if (d.x < B.x + 12 || d.x > B.x + B.w - 12) d.vx *= -1;
+      if (d.y < top + 12 || d.y > floor - 12) d.vy *= -1;
+      d.y = Math.max(top + 12, Math.min(floor - 12, d.y));
+      ctx.fillStyle = ION_INFO[d.k].color; ctx.beginPath(); ctx.arc(d.x, d.y, 11, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.fillText(ION_INFO[d.k].label, d.x, d.y + 4);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  // ---------- pH chart (single series: no legend, title names it) ----------
+  const ch = $('chart'), cx = ch.getContext('2d');
+  const CP = { l: 56, r: 16, t: 14, b: 40 };
+  let hoverIdx = -1;
+  function chartGeom() {
+    const xs = S.curve.map(p => p.x);
+    const xmax = Math.max(10, ...xs) * 1.05;
+    return { xmax, X: x => CP.l + x / xmax * (ch.width - CP.l - CP.r), Y: y => CP.t + (1 - y / 14) * (ch.height - CP.t - CP.b) };
+  }
+  function drawChart() {
+    const dark = isDark();
+    const ink = dark ? '#9aa3b2' : '#5b6474', grid = dark ? '#2c323d' : '#e6e9ee', line = dark ? '#6fa0ff' : '#2f6fde';
+    cx.clearRect(0, 0, ch.width, ch.height);
+    const { xmax, X, Y } = chartGeom();
+    cx.font = '13px system-ui'; cx.fillStyle = ink; cx.strokeStyle = grid; cx.lineWidth = 1;
+    for (let y = 0; y <= 14; y += 2) {
+      cx.beginPath(); cx.moveTo(CP.l, Y(y)); cx.lineTo(ch.width - CP.r, Y(y)); cx.stroke();
+      cx.textAlign = 'right'; cx.fillText(y, CP.l - 8, Y(y) + 4);
+    }
+    // neutral reference
+    cx.setLineDash([4, 4]); cx.strokeStyle = ink; cx.beginPath(); cx.moveTo(CP.l, Y(7)); cx.lineTo(ch.width - CP.r, Y(7)); cx.stroke(); cx.setLineDash([]);
+    cx.textAlign = 'center';
+    const step = xmax > 200 ? 50 : xmax > 80 ? 20 : xmax > 30 ? 10 : 5;
+    for (let x = 0; x <= xmax; x += step) cx.fillText(x, X(x), ch.height - CP.b + 18);
+    cx.fillText('Total volume added (mL)', (CP.l + ch.width - CP.r) / 2, ch.height - 4);
+    cx.save(); cx.translate(14, (CP.t + ch.height - CP.b) / 2); cx.rotate(-Math.PI / 2); cx.fillText('pH', 0, 0); cx.restore();
+    if (!S.curve.length) { cx.fillText('Pour something to start the curve', (CP.l + ch.width) / 2, ch.height / 2 - 10); return; }
+    cx.strokeStyle = line; cx.lineWidth = 2.5; cx.lineJoin = 'round';
+    cx.beginPath(); S.curve.forEach((p, i) => i ? cx.lineTo(X(p.x), Y(p.y)) : cx.moveTo(X(p.x), Y(p.y))); cx.stroke();
+    S.curve.forEach((p, i) => {
+      cx.fillStyle = line; cx.beginPath(); cx.arc(X(p.x), Y(p.y), i === hoverIdx ? 6 : 4, 0, Math.PI * 2); cx.fill();
+      cx.strokeStyle = dark ? '#161a21' : '#fbfcfd'; cx.lineWidth = 2; cx.stroke();
+    });
+    // label the latest point only
+    const last = S.curve[S.curve.length - 1];
+    cx.fillStyle = dark ? '#e7eaf0' : '#1d2330'; cx.textAlign = 'left'; cx.font = 'bold 13px system-ui';
+    cx.fillText('pH ' + last.y.toFixed(2), Math.min(X(last.x) + 8, ch.width - 70), Y(last.y) - 8);
+  }
+  const tip = $('tooltip');
+  ch.addEventListener('pointermove', e => {
+    const r = ch.getBoundingClientRect(), sx = ch.width / r.width;
+    const mx = (e.clientX - r.left) * sx, my = (e.clientY - r.top) * sx;
+    const { X, Y } = chartGeom();
+    let best = -1, bd = 30 * sx;
+    S.curve.forEach((p, i) => { const d = Math.hypot(X(p.x) - mx, Y(p.y) - my); if (d < bd) { bd = d; best = i; } });
+    hoverIdx = best;
+    if (best >= 0) {
+      const p = S.curve[best];
+      tip.style.display = 'block'; tip.style.left = e.clientX + 12 + 'px'; tip.style.top = e.clientY - 30 + 'px';
+      tip.innerHTML = `<b>pH ${p.y.toFixed(2)}</b> after ${p.x} mL<br><span class="muted">${p.label}</span>`;
+    } else tip.style.display = 'none';
+  });
+  ch.addEventListener('pointerleave', () => { hoverIdx = -1; tip.style.display = 'none'; });
+
+  // ---------- Side readouts ----------
+  function updateReadouts() {
+    const p = pH();
+    $('ph').textContent = p == null ? '—' : p.toFixed(2) + (p < 6.5 ? ' (acidic)' : p > 7.5 ? ' (alkaline)' : ' (neutral)');
+    $('temp').textContent = S.tempC.toFixed(1) + ' °C';
+    $('vol').textContent = Math.round(S.volL * 1000) + ' mL';
+    $('gas').textContent = Math.round(S.gasMl) + ' mL';
+    const rows = [];
+    for (const [k, mol] of Object.entries(S.ions)) if (mol > 1e-6 && ION_INFO[k]) rows.push(`<span>${ION_INFO[k].label} (aq)</span><b>${(mol / S.volL).toFixed(3)} M</b>`);
+    for (const [k, mol] of Object.entries(S.solids)) if (mol > 1e-6) rows.push(`<span>${SOLID_INFO[k].label} (s)</span><b>${(mol * 1000).toFixed(2)} mmol</b>`);
+    for (const i of S.indicators) rows.push(`<span>${INDICATORS.find(x => x.id === i).name}</span><b>✓</b>`);
+    $('contents').innerHTML = rows.join('') || '<span class="muted">Empty</span>';
+  }
+
+  // ---------- Guided experiments ----------
+  const EXPERIMENTS = [
+    { title: 'Acid–base titration', text: 'Starts with 25 mL HCl and phenolphthalein. Add NaOH 1 mL at a time and watch for the pink end point near 25 mL. Check the pH curve.',
+      setup: () => { pourById('hcl', 25); addIndicator(INDICATORS[0]); amountSel.value = '1'; } },
+    { title: 'Universal indicator rainbow', text: 'Starts with 10 mL HCl and universal indicator. Keep adding NaOH and see the colour sweep from red through green to purple.',
+      setup: () => { pourById('hcl', 10); addIndicator(INDICATORS[1]); amountSel.value = '1'; } },
+    { title: 'Test for chloride ions', text: 'Starts with 20 mL salt water. Add silver nitrate and look for the white precipitate.',
+      setup: () => { pourById('nacl', 20); amountSel.value = '5'; } },
+    { title: 'Metal displacement', text: 'Starts with 50 mL copper(II) sulfate. Drop in zinc, then stir. Watch the blue fade and copper appear.',
+      setup: () => { pourById('cuso4', 50); } },
+    { title: 'Reactivity race', text: 'Starts with 100 mL HCl. Add a magnesium ribbon, then a zinc granule. Which fizzes harder? Which heats the acid more?',
+      setup: () => { pourById('hcl', 100); } },
+    { title: 'Making carbon dioxide', text: 'Starts with 50 mL HCl. Add marble chips and watch the gas volume counter climb.',
+      setup: () => { pourById('hcl', 50); } },
+  ];
+  function pourById(id, ml) { pour(LIQUIDS.find(l => l.id === id), ml); }
+  EXPERIMENTS.forEach(ex => {
+    const d = document.createElement('div'); d.className = 'exp';
+    d.innerHTML = `<b>${ex.title}</b><p>${ex.text}</p>`;
+    const b = document.createElement('button'); b.textContent = 'Set up';
+    b.addEventListener('click', () => { resetAll(); ex.setup(); note('exp-' + ex.title, `<i>Experiment: ${ex.title}</i>`, true); });
+    d.appendChild(b); $('experiments').appendChild(d);
+  });
+
+  function resetAll() {
+    S = freshState(); particles.length = 0; bubbles.length = 0; solidPieces.length = 0; ionDots = [];
+    $('overflow').hidden = true;
+    $('log').innerHTML = '<li class="muted">Nothing yet. Pour something in!</li>';
+  }
+  $('reset').addEventListener('click', resetAll);
+  $('stir').addEventListener('click', () => { S.stirT = 2; });
+
+  // ---------- Main loop ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now;
+    react(dt);
+    drawBeaker(dt);
+    drawChart();
+    updateReadouts();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
