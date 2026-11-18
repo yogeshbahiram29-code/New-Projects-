@@ -356,6 +356,57 @@
      "t2": 3259.36
     }
    ]
+  },
+  {
+   "date": "2026-11-17",
+   "regime_on": false,
+   "picks": [
+    {
+     "symbol": "COFORGE",
+     "setup": "pullback",
+     "score": 83.0,
+     "trigger": 2066.06,
+     "stop": 1960.16,
+     "t1": 2277.86,
+     "t2": 2383.78
+    },
+    {
+     "symbol": "PTCIL",
+     "setup": "pullback",
+     "score": 82.4,
+     "trigger": 24124.1,
+     "stop": 22992.28,
+     "t1": 26387.74,
+     "t2": 27519.56
+    },
+    {
+     "symbol": "TECHM",
+     "setup": "pullback",
+     "score": 80.6,
+     "trigger": 1773.07,
+     "stop": 1728.03,
+     "t1": 1863.15,
+     "t2": 1908.2
+    },
+    {
+     "symbol": "LAURUSLABS",
+     "setup": "pullback",
+     "score": 78.4,
+     "trigger": 2351.15,
+     "stop": 2167.93,
+     "t1": 2717.59,
+     "t2": 2900.82
+    },
+    {
+     "symbol": "FLUOROCHEM",
+     "setup": "pullback",
+     "score": 71.8,
+     "trigger": 4877.27,
+     "stop": 4545.01,
+     "t1": 5541.79,
+     "t2": 5874.05
+    }
+   ]
   }
  ]
 }
