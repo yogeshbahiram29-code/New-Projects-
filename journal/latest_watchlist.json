@@ -407,6 +407,57 @@
      "t2": 5874.05
     }
    ]
+  },
+  {
+   "date": "2026-11-18",
+   "regime_on": false,
+   "picks": [
+    {
+     "symbol": "SONACOMS",
+     "setup": "pullback",
+     "score": 87.9,
+     "trigger": 904.4,
+     "stop": 876.01,
+     "t1": 961.18,
+     "t2": 989.59
+    },
+    {
+     "symbol": "JYOTICNC",
+     "setup": "pullback",
+     "score": 84.0,
+     "trigger": 1057.01,
+     "stop": 1011.74,
+     "t1": 1147.55,
+     "t2": 1192.82
+    },
+    {
+     "symbol": "COFORGE",
+     "setup": "pullback",
+     "score": 82.5,
+     "trigger": 2061.96,
+     "stop": 1960.61,
+     "t1": 2264.66,
+     "t2": 2366.02
+    },
+    {
+     "symbol": "TECHM",
+     "setup": "pullback",
+     "score": 81.4,
+     "trigger": 1766.97,
+     "stop": 1722.88,
+     "t1": 1855.15,
+     "t2": 1899.24
+    },
+    {
+     "symbol": "GAIL",
+     "setup": "breakout",
+     "score": 76.9,
+     "trigger": 191.54,
+     "stop": 184.74,
+     "t1": 205.14,
+     "t2": 211.96
+    }
+   ]
   }
  ]
 }
