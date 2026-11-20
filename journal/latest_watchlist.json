@@ -458,6 +458,57 @@
      "t2": 211.96
     }
    ]
+  },
+  {
+   "date": "2026-11-19",
+   "regime_on": false,
+   "picks": [
+    {
+     "symbol": "SONACOMS",
+     "setup": "pullback",
+     "score": 91.8,
+     "trigger": 907.41,
+     "stop": 876.16,
+     "t1": 969.91,
+     "t2": 1001.16
+    },
+    {
+     "symbol": "JYOTICNC",
+     "setup": "pullback",
+     "score": 91.0,
+     "trigger": 1077.08,
+     "stop": 1011.72,
+     "t1": 1207.8,
+     "t2": 1273.16
+    },
+    {
+     "symbol": "NYKAA",
+     "setup": "pullback",
+     "score": 86.5,
+     "trigger": 359.01,
+     "stop": 349.08,
+     "t1": 378.87,
+     "t2": 388.8
+    },
+    {
+     "symbol": "ADANIPORTS",
+     "setup": "pullback",
+     "score": 85.6,
+     "trigger": 1920.42,
+     "stop": 1864.07,
+     "t1": 2033.12,
+     "t2": 2089.47
+    },
+    {
+     "symbol": "FLUOROCHEM",
+     "setup": "breakout",
+     "score": 77.5,
+     "trigger": 5005.0,
+     "stop": 4737.86,
+     "t1": 5539.28,
+     "t2": 5806.42
+    }
+   ]
   }
  ]
 }
